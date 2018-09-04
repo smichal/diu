@@ -1,0 +1,14 @@
+{
+  "name": "ui-des",
+  "version": "1.0.0",
+  "description": "FIXME: Write a one-line description of your library/project.",
+  "dependencies": {
+    "jss": "^9.8.7",
+    "jss-preset-default": "^4.5.0",
+    "lit-html": "^0.10.2",
+    "shadow-cljs": "^2.5.0"
+  },
+  "devDependencies": {},
+  "author": "",
+  "license": "ISC"
+}

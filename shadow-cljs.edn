@@ -1,0 +1,36 @@
+;; shadow-cljs configuration
+{:source-paths
+ ["src"]
+
+ :dependencies
+ [[io.replikativ/hasch "0.3.5"]
+  [org.clojure/core.async  "0.4.474"]
+  [cider/cider-nrepl "0.18.0"]
+  [binaryage/devtools "0.9.10"]
+  [com.rpl/specter "1.1.1"]
+  [datascript "0.16.6"]
+  [mount "0.1.13"]
+  [binaryage/oops "0.6.2"]
+  ]
+
+ :builds
+ {:app {:target :browser
+        :output-dir "public/js"
+        :asset-path "/js"
+        :modules
+        {:main ;; <- becomes public/js/main.js
+         {:entries [app.main]}}
+        :devtools
+        {:http-root "public"
+         :http-port 8020}
+        }
+  :my-tests
+   {:target :browser-test
+    :test-dir "out/demo-test-dummy"
+    :ns-regexp ".*"
+    :devtools
+    {:http-port 8606
+     :http-root "out/demo-test-dummy"}}
+  }}
+
+; (shadow.cljs.devtools.api/nrepl-select :app)
