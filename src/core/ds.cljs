@@ -30,7 +30,17 @@
              :winst/rid {:db/unique :db.unique/identity}
              :wrapper/for-edit {:db/valueType :db.type/ref}
 
+
+             :step-editor/step-fn {:db/unique :db.unique/identity}
+             :step-editor/widget {:db/valueType :db.type/ref}
+
              })
+
+;; xxx
+(extend-type js/Function
+  IComparable
+  (-compare [x y]
+    (compare (str x) (str y))))
 
 (defn conn [] (:db @state))
 (defn db [] @(:db @state))
@@ -44,14 +54,21 @@
 (defn tx-report-listener [tx-report]
   (let [datoms (.-tx-data tx-report)]
     (doseq [[e a v _ added?] datoms]
-      (when added?                                          ;; what if removed / collections
-        (when-let [obs (get-in @(subsciptions) [:ea [e a]])]
-          (c/observable-set! obs v)))
+      (let [v (if (= :db.type/ref (get-in schema [a :db/valueType]))
+                (d/entity (db) v)                           ;; todo: observable enity
+                v)]
 
-      (when-let [obs (get-in @(subsciptions) [:a a])]
-        (c/observable-set! obs (if added?
-                                 (conj @obs v)
-                                 (disj @obs v))))
+        (when-let [obs (get-in @(subsciptions) [:ea [e a]])]
+          (if (= :db.cardinality/many (get-in schema [a :db/cardinality]))
+            (c/observable-set! obs (if added?
+                                     (conj @obs v)
+                                     (disj @obs v)))
+            (c/observable-set! obs (if added? v nil))))
+
+        (when-let [obs (get-in @(subsciptions) [:a a])]
+          (c/observable-set! obs (if added?
+                                   (conj @obs v)
+                                   (disj @obs v)))))
 
       )))
 
@@ -70,7 +87,8 @@
           (swap! (subsciptions) update :ea dissoc [eid attr]))
         #(get (d/entity (db) eid) attr)
         ))
-    (throw "can not observe not existing entity")
+    ;(throw "can not observe not existing entity")
+    nil
     ))
 
 (defn sub-attr [attr]
@@ -95,10 +113,12 @@
       )))
 
 (defn new-db []
-  (e/register-effect-handler! :tx tx-effect-handler)
+  ;(e/register-effect-handler! :tx tx-effect-handler)
   (let [conn (d/create-conn schema)]
     (d/listen! conn tx-report-listener)
     conn))
+
+
 
 (deftest test1
   (mount/stop #'state)

@@ -4,6 +4,8 @@
             [core.computed :as c]
             [datascript.core :as d]))
 
+(def log js/console.log)
+
 #_(defn widget-recipe-to-desc [recipe parent-ctx]
   (if (nil? recipe)
     {:context parent-ctx}
@@ -25,28 +27,35 @@
 
 (defn widget-desc [eid next-params parent-ctx]
   (c/computed
-    (fn []                                                  ;; watch full entity instaead
-      (let [steps @(ds/sub-entity-attr eid :widget/steps)
-            base-params @(ds/sub-entity-attr eid :widget/base-params)
-            base @(ds/sub-entity-attr eid :widget/base)
-            base-widget-desc (if base
-                               @(widget-desc base base-params parent-ctx)
-                               {:context parent-ctx})]
-        (reduce (fn [widget step]
-                  (let [f (:widget-step/fn step)
-                        params @(ds/sub-entity-attr (:db/id step) :widget-step/params)
-                        ;_ (js/console.log "PARAMS" params)
-                        ;params (->> params
-                        ;            ;; fixme, unify with ctx?
-                        ;            (map (fn [[k v]] [k (get next-params v v)]))
-                        ;            (into {}))
-                        ]
-                    ;(js/console.log "params" step params)
-                    (f widget params)))
-                (assoc-in base-widget-desc
-                          [:context :params]
-                          next-params)
-                (reverse steps))))))
+    (fn []                                                  ;; watch full entity instead
+      (if eid
+        (let [steps @(ds/sub-entity-attr eid :widget/steps)
+              base-params @(ds/sub-entity-attr eid :widget/base-params)
+              base @(ds/sub-entity-attr eid :widget/base)
+              base-widget-desc (if base
+                                 @(widget-desc base base-params parent-ctx)
+                                 {:context parent-ctx})]
+          (log "widget-desc" steps)
+          (reduce (fn [widget step]
+                    (let [_ (log "widget-desc step" step )
+                          f (:widget-step/fn step)
+                          params @(ds/sub-entity-attr (:db/id step) :widget-step/params)
+                          ;_ (js/console.log "PARAMS" params)
+                          ;params (->> params
+                          ;            ;; fixme, unify with ctx?
+                          ;            (map (fn [[k v]] [k (get next-params v v)]))
+                          ;            (into {}))
+                          ]
+                      ;(js/console.log "params" step params)
+                      (f widget params)))
+                  (update-in base-widget-desc
+                             [:context :params]
+                             merge next-params)
+                  #_(reverse steps)
+                  (reverse (sort-by :widget-step/priority steps))
+                  ))
+        {:render (fn [] (js/document.createComment "empty"))} ;; xxx
+        ))))
 
 (deftest test1
   (ds/tx-effect-handler [{:widget/name :test
@@ -60,7 +69,7 @@
 
 
 (defn compose-for-db [steps name]
-  (cond-> {:widget/steps (mapv (fn [[f p]] {:widget-step/fn f :widget-step/params p}) steps)}
+  (cond-> {:widget/steps (vec (map-indexed (fn [i [f p]] {:widget-step/fn f :widget-step/params p :widget-step/priority i}) steps))}
           name (assoc :widget/name name)))
 
 #_(deftest compose-for-db-test

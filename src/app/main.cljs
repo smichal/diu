@@ -1,329 +1,325 @@
 (ns app.main
-  (:require
-    [core.ds :as ds]
-    [core.widgets :as w]
-    [core.dom :as dom]
-    [core.computed :as c]
-    [core.events :as events]
-    [mount.core :as mount :refer [defstate]]
-    [datascript.core :as d]
-    [com.rpl.specter :as sp]
-    [oops.core :refer [oget oset! ocall oapply ocall! oapply!
-                       oget+ oset!+ ocall+ oapply+ ocall!+ oapply!+]]
-    ))
+  (:require [core.incr :as incr]
+            [mount.core :as mount :refer [defstate]]
+            [core.engine :as e]
+            core.events
+            core.styles
+            cljs.reader))
 
 
-(defprotocol IQuery
-  (-query [this ctx]))
+(def log js/console.log)
 
-(defn do-query [ctx q]
-  (if (implements? IQuery q)
-    (-query q ctx)
-    q))
-
-(defn r-do-query [ctx q]
-  (cond
-    (map? q) (sp/transform [sp/MAP-VALS] (partial r-do-query ctx) q)
-    (vector? q) (sp/transform [sp/ALL] (partial r-do-query ctx) q)
-    :else (do-query ctx q)))
-
-(defn value [x]                                             ;; xxx
+(defn value [x]
   (if (implements? IDeref x) @x x))
 
-(defn from-ctx [& path]
-  (reify
-    IQuery
-    (-query [_ ctx]
-      #_(get-in ctx path)
-      (let [res
-            (reduce (fn [a b]
-                      ;(println a b (map? a) (b a))
-                      (cond
-                        (or (fn? b) (implements? IFn b)) (b a)
-                        (implements? IFn a) (a b)
-                        (object? a) (oget+ a b)
-                        ;; xxx
-                        ))
-                    ctx
-                    (r-do-query ctx path))]
-        (js/console.log "from-ctx" path res)
-        res))
-    Object
-    (toString [this] (str "[ctx=> " path "]"))))
+(declare update-widget! mouseover-widget widget-selected)
 
-(defn from-db [eid attr]
-  (reify
-    IQuery
-    (-query [_ ctx]
-      ;(c/computed (fn []  ;; xxx: because deref
-                    (let [e (value (r-do-query ctx eid))
-                          a (value (r-do-query ctx attr))]
-                      (when (and e a)
-                        (let [res (ds/sub-entity-attr e a)]
-                          (js/console.log "from-db" e a "=>" @res)
-                          res))))
-    Object
-    (toString [this] (str "[db=> E: " eid " A: " attr "]"))))
+(def default-fields-editors
+  {:string :string-prop-editor})
 
-(defn from-db-query-attr [attr]
-  (reify
-    IQuery
-    (-query [_ ctx] (ds/sub-attr (value (r-do-query ctx attr))))
-    Object
-    (toString [this] (str "[db=> A: " attr "]"))))
-
-(defn cmp [f & qs]
-  (reify
-    IQuery
-    (-query [_ ctx] (apply f (map (partial do-query ctx) qs)))))
-
-(defn computed [f]
-  (reify
-    IQuery
-    (-query [_ ctx] (c/computed (f ctx)))))
+(def state-0
+  (merge-with
+    merge
+    core.events/app-cfg
+    core.styles/app-cfg
+    {:parts
+     {:w-p {:intercept {:after (fn [ctx params]
+                                 (assoc ctx
+                                   :dom {:tag :p
+                                         :text (:text params)}))}
+            :meta {:name "Text paragraph"
+                   :doc ""
+                   :props {:text {:label "Text"
+                                  :doc ""
+                                  :type :string}}
+                   ;:part-editor  :default-part-editor
+                   }}
+      :input {:intercept {:after (fn [ctx params]
+                                   (assoc ctx
+                                     :dom {:tag :input
+                                           :value (:value params)}))}}
+      :dom {:intercept {:after (fn [ctx params]
+                                 (assoc ctx
+                                   :dom params))}}
+      :container {:intercept {:after (fn [ctx params]
+                                       (assoc ctx
+                                         :dom {:tag :div
+                                               :children
+                                               (->> (if (map? (:children params))
+                                                      (:children params)
+                                                      (zipmap (range) (:children params)))
+                                                    (map
+                                                      (fn [[k v]]
+                                                        [k (e/render-child k ctx v nil [:container :children k])]))
+                                                    (into {}))
+                                               #_(container-children (:children params))}))}}
 
 
-(defn dispatch! [ctx event]
-  ;(js/console.log "ctx" ctx)
-  ((:dispatcher ctx) event)
-  )
+      :list-of {:intercept {:after (fn [ctx params]
+                                     (let [items (e/deref-one ctx (:items params))]
+                                       ;(println "L" items params ctx)
+                                       (when (map? items)
+                                         (assoc ctx
+                                           :dom {:tag :div
+                                                 :children (fn [ctx]
+                                                             (->> (e/deref-one ctx (:items params))
+                                                                  (map
+                                                                    (fn [[k _]]
+                                                                      [k (e/render-child k #_(-> ctx
+                                                                                                 (assoc :props (:common-props params))
+                                                                                                 (assoc-in [:props (get params :key-field-name :key)] k)
+                                                                                                 (assoc-in [:props (get params :val-field-name :val)] (get (:items params) k)))
+                                                                                         ctx
+                                                                                         (:item-widget params)
+                                                                                         (assoc (:common-props params)
+                                                                                           (get params :key-field-name :key) k
+                                                                                           (get params :val-field-name :val) (get (:items params) k))
+                                                                                         [:list-of :item-widget])]))
+                                                                  (into {})))}))))}
+                :meta {:name "List of"
+                       :props {:item-widget {:label "Item widget"
+                                             :type :string}
+                               :items {:label "Items"
+                                       :type :string}}}}
+      :call {:intercept {:after (fn [ctx params]
+                                  ;(println "CALL " params)
+                                  (assoc ctx :dom
+                                             (e/render-child "call" ctx (e/deref-one ctx (:widget params)) (:props params) [:call :widget])))}}
 
-(defn w-container [w p]
-  (assoc w
-    :render (fn [ctx]
-              {:tag :div
-               :children (map (fn [c]
-                                (let [[w p] (if (vector? c) c [c])]
-                                  {:widget w
-                                   :params (sp/transform [sp/MAP-VALS] (partial do-query ctx) p) #_p
-                                   :ctx ctx}))
-                              ; (value ...)
-                              (do-query ctx (:children p)))})))
+      :local-state {:intercept
+                    {:before (fn [ctx params]
+                               (println "Local state" params)
+                               (let [ctx (reduce (fn [ctx [key val]]
+                                                   (assoc ctx key (incr/cell val)))
+                                                 ctx
+                                                 params)
+                                     ctx (core.events/add-handlers ctx {:set-local (fn [e]
+                                                                                     (println "EVENT 1" e (get ctx (:key e)))
+                                                                                     (when-let [cell (get ctx (:key e))]
+                                                                                       (incr/cell-set! cell (:val e))))})]
+                                 ctx))
+                     ;:after
+                     #_(fn [ctx params]
+                         (reduce (fn [ctx [key _]]
+                                   (dissoc ctx key))
+                                 ctx
+                                 params))}}
 
-
-(defn w-button [w p]
-  (assoc w
-    :render (fn [ctx]
-              {:tag :button
-               :events {"click" (fn [e] (dispatch! ctx {:event :click}))}
-               :children {:text (do-query ctx (:text p))}})))
-
-(defn w-p [w p]
-  (assoc w
-    :render (fn [ctx]
-              (js/console.log "AAAAAA w-p" ctx)
-              {:tag :p
-               :children {:text (do-query ctx (:text p))}})))
-
-(defn w-set-styles [w p]
-  (update w :render
-          (fn [f]
-            (fn [ctx]
-              ;(js/console.log "styles" p)
-              (update
-                (f ctx)
-                :styles
-                merge
-                (sp/transform [sp/MAP-VALS] (partial do-query ctx) p)
-                )))))
-
-(defn w-list-of [w p]
-  (assoc w
-    :render (fn [ctx]
-              {:tag :div
-               :children (mapv
-                           (fn [x]
-                             {:widget (:item-widget p)
-                              :ctx (assoc ctx (:field-name p) x)})
-                           (value (do-query ctx (:items p))))})))
-
-(defn w-with-state [w _]
-  (update w :render
-          (fn [f]
-            (fn [ctx]
-              ;(js/console.log "styles" p)
-              (ds/tx-effect-handler [{:winst/rid (::dom/rid ctx)}])
-              (f ctx)))))
-
-#_(defn new-local-state [ctx]
-  (get-in
-    (ds/tx-effect-handler [{:db/id -1}])
-    [:tempids -1]))
-
-(defn dom-event-handler [map-or-fn ctx event]
-  (dispatch! ctx
-             (if (map? map-or-fn)
-               (sp/transform [sp/MAP-VALS] #(do-query (assoc ctx ::dom-event event) %) map-or-fn)
-               (map-or-fn ctx event))))
-
-(defn w-react-on-event [w p]
-  (update w :render
-          (fn [f]
-            (fn [ctx]
-              (update
-                (f ctx)
-                :events
-                merge
-                (sp/transform [sp/MAP-VALS] #(fn [e] (dom-event-handler % ctx e)) p)
-                )))))
-
-(defn w-input [w p]
-  (assoc w
-    :render (fn [ctx]
-              {:tag :input
-               :attrs {:value (do-query ctx (:value p))}})))
-
-(defn insert! [steps & [name]]
-  (get-in
-    (ds/tx-effect-handler [(assoc (w/compose-for-db steps name) :db/id -1)])
-    [:tempids -1]))
-
-(js/console.log (insert! [[w-button {:text "asd"}]]))
+      :locals {:intercept (fn [ctx params]
+                            ;(println "Locals" params)
+                            (reduce (fn [ctx [key val]]
+                                      (assoc-in ctx [:locals key] val))
+                                    ctx
+                                    params))}
 
 
-(defn events-dispatcher [w p]
-  (let [ec (events/new-event-context nil)]
-    (doseq [[name handler] p]
-      (events/register-event-handler! ec name handler))
+      :w {:w-p {:text "abcd"}
+          :set-styles {:color "red"}
+          :order [:set-styles :w-p]}
+      :w2 {:w-p {:text (fn [ctx] (str "abcd " (:idx ctx)))}
+           :dom-events {:click (fn [ctx] {:event :event1
+                                          :what (:idx ctx)})}
+           :order [:dom-events :w-p]}
+      :w11 {:container {:children {0 :w
+                                   1 {:container {:children (->> (conj (vec (repeat 5 :w2)) :w)
+                                                                 (zipmap (range)))}}}}
+            :events-handler {:event1 (fn [ctx]
+                                       (fn [e]
+                                         (println e)
+                                         ;(incr/cell-swap! state-cell #(assoc-in % [:parts :w :set-styles :color] "blue"))
+                                         ))}}
 
-    (assoc-in w
-              [:context :dispatcher]
-              (fn [event]
-                (js/console.log "EVENT" event)
-                (events/dispatch! ec event)))))
+      :app-preview {:w-p {:text "preview"}
+                    :set-styles {:color "#888"}
+                    :order [:set-styles :w-p]}
+
+      :test-items {:list-of {:items {0 0 1 1 2 42}
+                             :item-widget :test-list-item}}
+      :test-list-item {:w-p {:text #(str "a" (get-in % [:props :val]))}}
+      :test-list-item2 {:w-p {:text #(str "b" (get-in % [:props :val]))}}
+
+      :w1 {:set-styles {:display :grid
+                        :gridTemplateColumns "1fr 2fr 300px"
+                        :height "100vh"}
+           :local-state {:in-edit [:app-preview]
+                         :frame-rect [0 0 0 0]
+                         :mouseover-widget []}
+           :container
+           {:children {:a {:container {:children [{:w-p {:text "=> a"}
+                                                   :dom-events {:click {:event :set-local
+                                                                        :key :in-edit
+                                                                        :val [:test-items]}}
+                                                   :order [:dom-events :w-p]}
+                                                  {:w-p {:text "=> b"}
+                                                   :dom-events {:click {:event :set-local
+                                                                        :key :in-edit
+                                                                        :val [:app-preview]}}
+                                                   :order [:dom-events :w-p]}]}}
+                       :left {:container {:children {:0 :app-preview
+                                                     :1 :test-items}}
+                              :dom-events {:mouseover {:event :mouseover-widget}
+                                           :click {:event :widget-selected}}
+                              :order [:dom-events :container]}
+                       :right {:widget-editor {:in-edit #(get % :in-edit) #_:test-items}}
+
+                       :frame :hover-frame
+
+                       }}
+           :events-handler {:mouseover-widget #(do mouseover-widget)
+                            :widget-selected #(do widget-selected)}
+           :order [:local-state :set-styles :events-handler :container]
+           }
+
+      :hover-frame {:set-styles {:position :absolute
+                                 :border "1px solid #00e"
+                                 :z-index -1
+                                 :top (fn [ctx] (get @(ctx :frame-rect) 0))
+                                 :left (fn [ctx] (get @(ctx :frame-rect) 1))
+                                 :width (fn [ctx] (get @(ctx :frame-rect) 2))
+                                 :height (fn [ctx] (get @(ctx :frame-rect) 3))
+                                 }
+                    :dom {:tag :div}}
+
+      :widget-editor {;:locals {:in-edit #(deref (get-in % [:props :in-edit]))}
+                      :container
+                      {:children
+                       [{:w-p {:text #(str "props of " @(get-in % [:props :in-edit]))}}
+                        {:dom {:tag :hr}}
+                        {:list-of {:items #(get-in % (cons :parts @(get-in % [:props :in-edit])))
+                                   :common-props {:widget #(deref (get-in % [:props :in-edit]))}
+                                   :key-field-name :part
+                                   :val-field-name :part-props
+                                   :item-widget :part-editor-wrapper}}]}
+                      :events-handler {:update-widget #(do update-widget!)}
+                      :set-styles {:background-color "rgba(239,237,231,.5)"
+                                   :border-left "1px solid #cec9c4"
+                                   :padding "0 10px"}
+                      :order [:set-styles :events-handler :container]
+                      }
+
+      :part-editor-wrapper {:container
+                            {:children
+                             [{:w-p {:text (fn [ctx]
+                                             (str (get-in ctx [:props :part])
+                                                  " "
+                                                  @(get-in ctx [:parts (get-in ctx [:props :part]) :meta :name])
+                                                  ))}}
+                              #_{:list-of {:item-widget :part-prop-editor #_:default-prop-editor
+                                           :items #(get-in % [:props :part-props])
+                                           :common-props {:widget #(get-in % [:props :widget])
+                                                          :part #(get-in % [:props :part])}}}
+                              #_{:call {:widget :default-part-editor
+                                        :params {:widget #(get-in % [:props :widget])
+                                                 :part #(get-in % [:props :part])}}}
+                              {:default-part-editor {:widget #(get-in % [:props :widget])
+                                                     :part #(get-in % [:props :part])}}
+                              {:dom {:tag :hr}}
+                              ]}}
+
+      :default-part-editor {:container
+                            {:children
+                             [{:list-of {:item-widget :part-prop-editor #_:default-prop-editor
+                                         :items #(get-in % [:parts (get-in % [:props :part]) :meta :props])
+                                         :key-field-name :field-name
+                                         :val-field-name :field-data
+                                         :common-props {:widget #(get-in % [:props :widget])
+                                                        :part #(get-in % [:props :part])}}}]}}
+
+      :part-prop-editor {:container
+                         {:children
+                          [{:w-p {:text #(str @(get-in % [:props :field-data :label]) " <" (get-in % [:props :field-name]) ">")}}
+                           {:call
+                            {:widget #(get default-fields-editors @(get-in % [:props :field-data :type]))
+                             :props {:widget #(get-in % [:props :widget])
+                                     :part #(get-in % [:props :part])
+                                     :field #(get-in % [:props :field-name])
+                                     }}
+                            }
+                           ]}}
+
+      :log-params {:w-p {:text #(:props %)}}
+      :string-prop-editor {:input {:value #(incr/fmap pr-str
+                                                      (get-in % (concat [:parts] (get-in % [:props :widget]) [(get-in % [:props :part]) (get-in % [:props :field])])))}
+                           :dom-events {:keyup {:event :update-widget
+                                                :widget #(get-in % [:props :widget])
+                                                :part #(get-in % [:props :part])
+                                                :field #(get-in % [:props :field])
+                                                }}
+                           :order [:dom-events :input]}
 
 
-(defn register []
-  ;(mount/start)
 
-  (ds/tx-effect-handler [{:db/id 10 :some/val "v0"}])
-  (js/console.log "entity" (:some/val (d/entity (ds/db) 10)))
+      :default-prop-editor {:container
+                            {:children
+                             [{:w-p {:text #(str (get-in % [:props :key]))}}
+                              {:input {:value #(incr/fmap pr-str (get-in % [:props :val]))}
+                               :dom-events {:keyup {:event :update-widget
+                                                    :widget #(get-in % [:props :widget])
+                                                    :part #(get-in % [:props :part])
+                                                    :field #(get-in % [:props :key])
+                                                    }}
+                               :order [:dom-events :input]}]}}
+      }}))
 
-  (let [
-        text-node (insert! [[w-set-styles {:color "#f00" :font-size "20px"}]
-                            [w-p {:text (from-db 10 :some/val)}]]
-                           :text-node)
-        app
-        (insert!
-          [[w-set-styles {:flex 1
-                          :margin "10px"}]
-           [w-container
-            {:children
-             [;[:widget/name :base]
-              text-node
-              text-node
-              (insert! [[w-input {}]])
-              (insert! [[w-button {:text "button1"}]] :button1)
-              ]}]]
-          :app)
+(def state-cell (incr/cell state-0))
 
-        step-param (insert! [[w-set-styles {:display :flex}]
-                             [w-container
-                              {:children
-                               [(insert! [[w-set-styles {:flex 1}]
-                                          [w-p {:text (from-ctx :kv 0)}]])
-                                (insert! [[w-set-styles {:flex 1}]
-                                          [w-react-on-event {"input" {:event :params-changed
-                                                                      :step (from-ctx :step)
-                                                                      :key (from-ctx :kv 0)
-                                                                      :val (from-ctx ::dom-event #(.-value (.-target %)))}}]
-                                          [w-input {:value (from-ctx :kv 1)
-                                                    ;:on-input
-                                                    #_(cmp
-                                                        (fn [step k] {:event :params-changed :step step :key k})
-                                                        (from-ctx :step)
-                                                        (from-ctx :kv 0))}]] :step-input)
-                                ]}]]
-                            :step-param)
+(def ctx-0
+  (with-meta
+    {:parts (get state-cell :parts)}
+    {:incr/name "N"}))
 
-        step (insert! [[w-container
-                        {:children
-                         [(insert! [[w-p {:text (cmp #(str "fn: " (.-name %))
-                                                     (from-ctx :step :widget-step/fn))}]])
-                          (insert! [[w-list-of {:items (from-ctx :step :widget-step/params)
-                                                :item-widget step-param
-                                                :field-name :kv}]])
+(defn update-widget! [e]
+  (incr/cell-swap! state-cell (fn [m]
+                                (assoc-in m (concat [:parts ] (:widget e) [(:part e) (:field e)])
+                                          (cljs.reader/read-string (:event/value e)))))
+  (println "update-widget!" e))
 
-                          (insert! [[w-p {:text (cmp #(str "params: " (pr-str (deref %)))
-                                                     ;; db not ctx
-                                                     (from-db (from-ctx :step) :widget-step/params)
-                                                     #_(from-ctx :step :widget-step/params))}]])
-                          ]}]] :step)
-
-        props (insert! [[w-set-styles {:color "#fff"
-                                       :background "#333"
-                                       :padding "20px"
-                                       :font-family "Fira Code"
-                                       :font-size "11px"
-                                       :width "260px"
-                                       }]
-                        #_[w-p {:text (from-db (from-ctx :params :widget) :widget/steps)}]
-                        [w-list-of {:items (from-db (from-ctx :params :widget) :widget/steps)
-                                    :item-widget step
-                                    :field-name :step
-                                    }]] :props)
-
-        widget-list-item (insert! [[w-react-on-event {"click" {:event :select-widget
-                                                               :widget (from-ctx :widget)
-                                                               :wrapper 1 ;(from-ctx ::dom/parent)
-                                                               }}]
-                                   [w-p {:text (from-ctx :widget)}]] :widget-list-item)
-
-        widgets-list (insert! [[w-set-styles {:color "#fff"
-                                              :background "#333"
-                                              :padding "20px"
-                                              :font-family "Fira Code"
-                                              :font-size "11px"
-                                              }]
-                               [w-list-of {:items (from-db-query-attr :widget/name)
-                                           :item-widget widget-list-item
-                                           :field-name :widget}]] :widgets-list)
-
-        editor-wrapper (insert!
-                         [[events-dispatcher
-                           {:click (fn []
-                                     {:tx [[:db/add 10 :some/val (str "t-" (.getTime (js/Date.)))]]})
-                            :params-changed (fn [_ {:keys [step key val] :as event}]
-                                              ;(js/console.log "event" event)
-                                              (let [v (:widget-step/params (d/entity (ds/db) (:db/id step)))]
-                                                {:tx [[:db/add (:db/id step) :widget-step/params (assoc v key val)]]}))
-                            :select-widget (fn [_ {:keys [widget wrapper]}]
-                                             {:tx [{:winst/rid wrapper
-                                                    :wrapper/for-edit [:widget/name widget]}]})
-                            }]
-                          [w-with-state {}]
-                          [w-set-styles {:display :flex
-                                         :align-items :stretch
-                                         :height "100vh"}]
-                          [w-container
-                           {:children
-                            [widgets-list
-                             app
-                             [props {:widget (from-db [:winst/rid (from-ctx ::dom/rid)] :wrapper/for-edit)}]]}]]
-                         :editor-wrapper)
+(defn mouseover-widget [e ctx]
+  (let [{:strs [top left width height]} (:event/bounding-rect e)
+        widget-path (:widget/path (@e/name->ctx (:event/target-id e)))
         ]
+    (incr/cell-swap! (:frame-rect ctx)
+                     #(do [top left width height]))
+    (incr/cell-swap! (:mouseover-widget ctx) (fn [] widget-path))
+    ;(println "mouseover-widget" widget-path e)
+    ))
 
-    (c/reaction
-      (fn []
-        (js/console.log "AAA")
-        (dom/render-children! js/document.body [{:widget editor-wrapper :ctx {}}])))))
-
-
-
-(defn ^:dev/after-load start []
-  (js/console.log "start")
+(defn widget-selected [e ctx]
+  ;(println "widget-selected" e @(:mouseover-widget ctx))
+  (incr/cell-swap! (:in-edit ctx) (fn [] @(:mouseover-widget ctx)))
   )
 
-(defn ^:export init []
-  ;; init is called ONCE when the page loads
-  ;; this is called in the index.html and must be exported
-  ;; so it is available even in :advanced release builds
-  (js/console.log "init")
+(defn tt []
+  (let [rw (e/render-child "" ctx-0 :w1 nil [])
+        fd (e/flat-dom rw)
+        obs (incr/diff-thunk (fn [] (print "delta " @fd)))
+        ]
+    (incr/add-parent! obs (incr/Observer.))
+    (incr/stabilize!)
+    (js/console.log rw)
+    @rw))
 
-  (register)
 
-  (start))
 
-;; this is called before any code is reloaded
-(defn ^:dev/before-load stop []
-  (js/console.log "stop"))
+(comment
+  (defn ^:dev/after-load start []
+    (js/console.log "start")
+
+    ;(incr/cell-set! state-cell state-0)
+    ;(incr/stabilize!)
+
+    )
+
+  (defn ^:export init []
+    ;; init is called ONCE when the page loads
+    ;; this is called in the index.html and must be exported
+    ;; so it is available even in :advanced release builds
+    (js/console.log "init")
+
+    (register)
+
+    (start))
+
+  ;; this is called before any code is reloaded
+  (defn ^:dev/before-load stop []
+    (js/console.log "stop")))

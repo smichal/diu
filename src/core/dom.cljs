@@ -14,6 +14,8 @@
 (def last-runtime-widget-id (atom 0))
 (defn next-runtime-id [] (swap! last-runtime-widget-id inc))
 
+(def log js/console.log)
+
 (defstate sheet
           :start (do
                    (. jss setup)
@@ -104,33 +106,37 @@
                      nil)))
     elem))
 
+(defn value [x]                                             ;; xxx
+  (if (implements? IDeref x) @x x))
+
 (defn widget-desc [w]
   ;(js/console.log "widget-desc" w)
   (if (:render w)
     w
-    @(w/widget-desc (:widget w) (:params w) (:ctx w))))
+    @(w/widget-desc (value (:widget w)) (value (:params w)) (:ctx w)))) ;; xxx: value ?
 
 (defn render-widget [w]
-  (let [rid (next-runtime-id)]
-    (c/computed
-      (fn []
-        (let [w (widget-desc w)
-              render-fn (:render w)
-              ctx (:context w)
-              ctx (assoc ctx ::rid rid
-                             ::parent (::rid ctx))
-              dom (render-fn ctx)]
-          ;(js/console.log "render-widget" w)
-          ;(js/console.log "render-widget dom" dom)
-          (render dom))))))
+  (if (or (:widget w)                                       ;; xxx value ?
+          (:render w))
+    (let [rid (next-runtime-id)]
+      (c/computed
+        (fn []
+          (let [w (widget-desc w)
+                render-fn (:render w)
+                ctx (:context w)
+                ctx (assoc ctx ::rid rid
+                               ::parent (::rid ctx))
+                dom-or-widg (render-fn ctx)
+                result (render dom-or-widg)]
+            (if (implements? IDeref result) @result result)))))
+    (js/document.createComment "empty")))
 
 (defn render [w]
   (cond
     (:tag w) (render-tag w)
     (contains? w :text) (render-text (get w :text ""))
-    :else (render-widget w)))
-
-(def log js/console.log)
+    ;(implements? IDeref w) (render @w)                      ;; xxx
+    w (render-widget w)))
 
 (defonce _handlers
          (doseq [t event-types]
