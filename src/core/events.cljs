@@ -34,13 +34,20 @@
                ;::dispatch (partial ctx-dispatch handlers)
                )))
 
+(defn add-events [ctx events]
+  (update-in ctx [:dom :events] merge (assoc events ::scope-id (::scope-id ctx))))
+
 (def app-cfg
   {:parts
    {:events-handler {:intercept {:before add-handlers}}
     :dom-events {:intercept {:after (fn [ctx params]
-                                      (assoc-in ctx [:dom :events] (assoc params ::scope-id (::scope-id ctx)))
-                                      )}}
-    }})
+                                      (add-events ctx params))}
+                 :meta
+                 {:name "Trigger DOM Events"
+                  :props {:click {:label "click"
+                                  :type :edn}
+                          :mouseover {:label "mouseover"
+                                      :type :edn}}}}}})
 
 (defn dispatch! [event]
   ;(println "event" event)
@@ -48,9 +55,11 @@
     (let [scope (@scopes scope-id)
           ctx (:ctx scope)
           handler (get-in scope [:handlers (:event event)])]
+      ;(println scope)
       (if handler
         (handler event ctx)
-        (when-let [parent (:parent scope)]
-          (recur parent))))))
+        (if-let [parent (:parent scope)]
+          (recur parent)
+          (js/console.warn "event without handler" event))))))
 
 

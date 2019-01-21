@@ -10,6 +10,9 @@
 
 ;; :before, :after, :error
 
+(defprotocol IDisplayable
+  (-display [this]))
+
 (defn interceptors-execute-step [ctx]
   (let [stage (cond
                 (:error ctx) :error
@@ -91,18 +94,30 @@
               [k (fn [ctx] (v ctx (deref-props ctx params)))]))
        (into {})))
 
+(declare deep-deref)
+
 (defn call-interceptor [params]
   ;(println "call-interceptor" params)
   (let [prev-props (atom nil)]
-    {:before (fn [ctx]
+    {:before (fn call-interceptor-before [ctx]
                (reset! prev-props (:props ctx))
                ;(println "call-interceptor" (deref-props ctx params))
                (assoc ctx :props (deref-props ctx params)))
-     :after (fn [ctx]
-              (assoc ctx :props @prev-props))}))
+     :after (fn call-interceptor-after [ctx]
+              (-> ctx
+                  ;; fixme: ctx getteer passed to dom are derefed in wrong ctx
+                  ;; but line below loops
+                  ;(update :dom #(deep-deref ctx %))
+                  (assoc :props @prev-props)))}))
 
-(defn get-subparts [part]
-  (let [parts (get part :order (keys part))]
+(defn get-subparts [part parts-data]
+  ;; fixme: order, dependency on ctx
+  ;; probably remove :priority, depend on local :order
+  (let [parts (get part :order)
+        parts (or parts
+                  (sort-by
+                    #(- (or @(get-in parts-data [% :meta :priority]) 1))
+                    (keys part)))]
     (keep #(do [% (get part %)]) parts)))
 
 (defn get-interceptors [ctx part params]
@@ -117,30 +132,19 @@
         (when (not (empty? params)) [(call-interceptor params)])
         (mapcat
           (fn [[part pparams]] (get-interceptors ctx part pparams))
-          (get-subparts part))))))
+          (get-subparts part (:parts ctx)))))))
 
-(def widget-desc->dom-desc*
-  (incr/memo*
-    (fn wd->dd [ctx part params]
-      ;(println "widget-desc->interceptors" part)
-      (let [
-            ;widget-desc (if (keyword? w) @(get-in ctx [:parts w]) w)
-            ;parts (get widget-desc :order (keys widget-desc))
-            interceptors (get-interceptors ctx part params)
-            #_(->> transformers
-                              (mapv (fn [t]
-                                      (let [trans @(get-in ctx [:transformers t])
-                                            params (deref-props ctx (get widget-desc t))]
-                                        (->> trans
-                                             (map (fn [[k v]]
-                                                    [k (fn [ctx] (v ctx params))]))
-                                             (into {}))))))
-            ;_ (println "CTX" ctx)
+(defn widget-desc->dom-desc [ctx part params]
+  (incr/thunk
+    (fn wd->dd []
+      ;(println "widget-desc->interceptors" part params)
+      (let [interceptors (get-interceptors ctx part params)
             widget (execute-interceptors ctx interceptors)]
+        ;(println "inter" interceptors)
         (:dom widget)))))
 
-(def widget-desc->dom-desc (first widget-desc->dom-desc*))
-(def widget-desc->dom-desc-memo (second widget-desc->dom-desc*))
+;(def widget-desc->dom-desc (first widget-desc->dom-desc*))
+;(def widget-desc->dom-desc-memo (second widget-desc->dom-desc*))
 
 (defn deref-one [ctx v]
   (cond
@@ -158,34 +162,20 @@
                      v))
     (implements? IDeref #_incr/INode v) (deep-deref ctx @v)
     (and (not (coll? v)) (not (keyword? v)) (ifn? v)) (deep-deref ctx (v ctx))
-    :else v)
+    :else v))
 
-  #_(if (map? m)
-    (into (with-meta {} (meta m))
-          (keep
-            (fn [[k v]]
-              (when-let [v (cond
-                             (implements? IDeref #_incr/INode v) (deep-deref ctx @v)
-                             (map? v) (deep-deref ctx v)
-                             (and (not (coll? v)) (not (keyword? v)) (ifn? v)) (deep-deref ctx (v ctx)) ; (deep-deref (v ..??
-                             ;; binding *ctx* ?
-                             v v)]
-                [k v]))
-            m))
-    m))
-
-(def render-widget*
-  (incr/diff-val-memo*
-    (fn render-widget' [ctx w params]
+(defn render-widget [ctx w params]
+  (incr/diff-val-thunk
+    (fn render-widget' []
       ;(println "render-widget start" w)
       (let [res
-            (deep-deref ctx @(widget-desc->dom-desc ctx w params))]
-        (println "render-widget" w res)
+            (deep-deref ctx @(incr/call-sub-thunk nil widget-desc->dom-desc ctx w params))]
+        ;(println "render-widget" w res)
         res
         ))))
 
-(def render-widget (first render-widget*))
-(def render-widget-memo (second render-widget*))
+;(def render-widget (first render-widget*))
+;(def render-widget-memo (second render-widget*))
 
 (defn name-extend [name key]
   (str name "/" key))
@@ -193,8 +183,11 @@
 (def name->ctx (atom (sorted-map)))
 
 (defn render-child [key ctx widget params widget-path]
-  ;(println "render-child" key ctx widget)
-  (let [ctx (-> ctx
+  ;(println "render-child" key widget params)
+  (let [widget (if (implements? IDisplayable widget)
+                 (-display widget)
+                 widget)
+        ctx (-> ctx
                 (assoc :idx key)
                 (update :widget/path (fn [p]
                                        (if (keyword? widget)
@@ -202,14 +195,16 @@
                                          (concat p widget-path))))
                 (vary-meta update :incr/name name-extend key))]
     (swap! name->ctx assoc (-> ctx meta :incr/name) ctx)
-    (render-widget
+    (incr/call-sub-thunk
+      key
+      render-widget
       ctx
       widget
       params)))
 
 (defn dispose-node! [id]
-  (incr/remove-memos-with-prefix render-widget-memo id)
-  (incr/remove-memos-with-prefix widget-desc->dom-desc-memo id)
+  ;(incr/remove-memos-with-prefix render-widget-memo id)
+  ;(incr/remove-memos-with-prefix widget-desc->dom-desc-memo id)
   (incr/remove-memos-with-prefix name->ctx id))
 
 (defn node [parent prefix x]
@@ -232,9 +227,9 @@
                         (node prefix (name-extend prefix k) v)))
                 (not-empty)))))
 
-(def flat-dom
-  (incr/diff-memo
-    (fn [c]
+(defn flat-dom [c]
+  (incr/diff-thunk
+    (fn []
       ;(println "NODE" @c)
       (node "root" "N" @c))))
 

@@ -22,9 +22,9 @@
                                       #_(assoc-in ctx [:dom :style] params))}
                  :meta {:name "Styles"
                         :doc ""
-                        :props {:color {:label "Color"
-                                       :doc ""
-                                       :type :string}}
+                        :props {:color {:label "Color" :type :string}
+                                :font-size {:label "Font size" :type :string}
+                                }
                         }
                  }}})
 

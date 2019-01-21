@@ -4,7 +4,8 @@
             core.events
             core.styles
             [app.main :as m]
-            [cognitect.transit :as t]))
+            [cognitect.transit :as t]
+            clojure.string))
 
 
 (def transit-w (t/writer :json))
@@ -14,14 +15,43 @@
 (declare worker)
 
 (defn emit-event! [e]
-  ;(js/console.log e)
+  (js/console.log e)
   (.postMessage worker (t/write transit-w e)))
+
+(def EVENTS "abort abort abort afterprint animationend animationiteration animationstart audioprocess beforeprint beforeunload beginEvent blocked blur cached canplay canplaythrough change chargingchange chargingtimechange checking click close compassneedscalibration complete compositionend compositionstart compositionupdate contextmenu copy cut dblclick devicelight devicemotion deviceorientation deviceproximity dischargingtimechange downloading drag dragend dragenter dragleave dragover dragstart drop durationchange emptied ended ended endEvent error focus focusin focusout fullscreenchange fullscreenerror gamepadconnected gamepaddisconnected hashchange input invalid keydown keypress keyup languagechange The definition of 'NavigatorLanguage.languages' in that specification. levelchange load loadeddata loadedmetadata loadend loadstart message mousedown mouseenter mouseleave mousemove mouseout mouseover mouseup noupdate obsolete offline online open open orientationchange pagehide pageshow paste pause pointerlockchange pointerlockerror play playing popstate progress progress ratechange readystatechange repeatEvent reset resize scroll seeked seeking select show stalled storage submit success suspend SVGAbort SVGError SVGLoad SVGResize SVGScroll SVGUnload SVGZoom timeout timeupdate touchcancel touchend touchenter touchleave touchmove touchstart transitionend unload updateready upgradeneeded userproximity versionchange visibilitychange volumechange waiting wheel")
+(def events-per-elem (zipmap (clojure.string/split EVENTS #" ")
+                             (repeatedly #(js/WeakMap.))))
+
+(defn dom-event-handler [e]
+  (let [data (.get (events-per-elem (.-type e)) (.-currentTarget e))]
+    (emit-event!
+      (assoc data                                  ;:dom-event e
+        :event/value (.-value (.-target e))
+        :event/target-id (.-id (.-target e))
+        :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))))))
+
+(defn set-events! [elem events]
+  (doseq [[type data] events
+          :when (not= type :core.events/scope-id)]
+    (let [memo (get events-per-elem (name type))
+          data (if-let [sid (:core.events/scope-id events)]
+                 (assoc data :core.events/scope-id sid)
+                 data)
+          data (merge (.get memo elem) data)]
+      (.set memo elem data)
+      (.addEventListener
+        elem
+        (name type)
+        dom-event-handler))))
 
 (defn process-dom-change! [[id x]]
   (js/console.log "Apply diff" id x)
 
   (when (:tag x)
     ;; todo: probably delete old node with that id if exists
+    (when-let [elem (js/document.getElementById id)]
+      (.remove elem))
+
     (let [elem (js/document.createElement (name (:tag x)))]
       (set! (.-id elem) id)
       ;(js/console.log "get " (:parent x) (js/document.getElementById (:parent x)))
@@ -47,26 +77,13 @@
       (set! (.-value elem) v)))
 
   (when-let [parent (:remove-from x)]
-    (.removeChild
+    (.remove (js/document.getElementById id))
+    #_(.removeChild
       (js/document.getElementById parent)
       (js/document.getElementById id)))
 
-  (doseq [[type data] (:events x)
-          :when (not= type :core.events/scope-id)]
-    (.addEventListener
-      (js/document.getElementById id)
-      (name type)
-      ((fn [data]
-         (fn [e]
-           (emit-event!
-             (assoc data                                    ;:dom-event e
-               :core.events/scope-id (:core.events/scope-id (:events x))
-               :event/value (.-value (.-target e))
-               :event/target-id (.-id (.-target e))
-               :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e))) ))))
-        data)))
-
-  )
+  (when-let [events (:events x)]
+    (set-events! (js/document.getElementById id) events)))
 
 
 (defn init-dom-mutator! [worker]
@@ -125,14 +142,19 @@
   (defn tt []
     (let [rw (e/render-widget (assoc m/ctx-0
                                 :widget/path [:w1])
-                              :w1)
+                              :w1
+                              nil)
           fd (e/flat-dom rw)
           obs (incr/diff-thunk (fn []
+                                 ;(println "OBS")
                                  (emit-dom-diff! @fd)))
           ]
       (incr/add-parent! obs (incr/Observer.))
       (incr/stabilize!)
-      ;(js/console.log rw)
+      ;(js/console.log fd)
+      (set! (.-fd js/self) fd)
+      (set! (.-obs js/self) obs)
+
       obs))
   (def _a (tt))
 
