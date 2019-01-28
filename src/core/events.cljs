@@ -4,18 +4,11 @@
     [mount.core :refer [defstate]]))
 
 
-#_(defstate events-queue
-  :start (fn []))
-
 (def events-queue (atom []))
 (def effects-queue (atom []))
 
 (def log js/console.log)
 
-#_(defn ctx-dispatch [handlers event]
-  (log "EVENT" event)
-  (let [f (get handlers (:event event))]
-    (f event ctx)))
 
 (def last-scope-id (atom 0))
 (def scopes (atom {}))
@@ -40,7 +33,8 @@
 (def app-cfg
   {:parts
    {:events-handler {:intercept {:before add-handlers}}
-    :dom-events {:intercept {:after (fn [ctx params]
+    :dom-events {:intercept {:after (fn dom-events-after [ctx params]
+                                      (println "dom-event" params)
                                       (add-events ctx params))}
                  :meta
                  {:name "Trigger DOM Events"
@@ -48,6 +42,8 @@
                                   :type :edn}
                           :mouseover {:label "mouseover"
                                       :type :edn}}}}}})
+
+(declare execute-effects!)
 
 (defn dispatch! [event]
   ;(println "event" event)
@@ -57,9 +53,27 @@
           handler (get-in scope [:handlers (:event event)])]
       ;(println scope)
       (if handler
-        (handler event ctx)
+        (execute-effects! (handler event ctx) ctx)
         (if-let [parent (:parent scope)]
           (recur parent)
           (js/console.warn "event without handler" event))))))
 
 
+(def effects-handlers (atom {}))
+
+(defn register-effect-handler! [name handler]
+  (when-let [h (@effects-handlers name)]
+    (when (not= h handler)
+      (js/console.warn "handler for" name "already exists")))
+  (swap! effects-handlers assoc name handler))
+
+;; as map?
+(defn execute-effects! [fxs ctx]
+  (let [fxs (if (vector? (first fxs)) fxs [fxs])]
+    (doseq [[fx & args] fxs]
+      ; try
+      (if-let [h (@effects-handlers fx)]
+        (do
+          ;(js/console.log "FX" fx args)
+          (apply h ctx args))
+        (js/console.warn "no handler for effect" fx)))))

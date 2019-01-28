@@ -7,15 +7,16 @@
   :min-lein-version "2.7.1"
 
   :dependencies [[org.clojure/clojure "1.9.0"]
-                 [org.clojure/clojurescript "1.10.339"]
+                 [org.clojure/clojurescript "1.10.439"]
 
-                 [io.replikativ/hasch "0.3.5"]
+                 ;[io.replikativ/hasch "0.3.5"]
                  [org.clojure/core.async  "0.4.474"]
-                 [smidjen "0.2.1"]
-                 [com.rpl/specter "1.1.1"]
-                 [datascript "0.16.6"]
-                 [mount "0.1.13"]
-                 [binaryage/oops "0.6.2"]
+                 [cider/cider-nrepl "0.18.0"]
+                 [binaryage/devtools "0.9.10"]
+                 [com.rpl/specter "1.1.2"]
+                 [datascript "0.16.7"]
+                 [mount "0.1.14"]
+                 [binaryage/oops "0.6.3"]
 
                  ]
   )

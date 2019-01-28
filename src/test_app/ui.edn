@@ -1,0 +1,72 @@
+{:test_app {:container {:children {:r0 :app-preview
+                                   :r1 :test-items
+                                   :r2 :find-popup
+                                   }}
+            :set-styles {:padding 15}
+            ;:set-styles
+            #_{:background "#fff"
+               :box-shadow "0 4px 6px 0 rgba(0,0,0,0.2)"
+               :padding 15}
+            :dom-events {:mouseover {:event :mouseover-widget}
+                         :click {:event :widget-selected}}
+            }
+ :test-items {:list-of {:items {0 0 1 1 2 42}
+                        :item-widget :test-list-item}}
+ :test-list-item {:w-p {:text #expr "'a' + props.val"}}
+ :test-list-item2 {:w-p {:text #expr "'b' + props.val"}}
+ :app-preview {:w-p {:text "preview"}
+               :set-styles {:color "#888"}}
+
+
+ :find-popup {:container
+              {:children [#_{:w-p {:text "Add new widget"}
+                           :set-styles {:padding "3px"
+                                        :margin 0
+                                        :text-align :center
+                                        :text-transform :uppercase
+                                        :color "#aaa"
+                                        :font-size 12
+                                        :border-bottom "1px solid rgba(0,0,0,0.1)"}}
+                          {:container {:children [{:icon {:icon "magnify"}
+                                                   :set-styles {:opacity 0.5}}
+                                                  {:input {:value ""
+                                                           :placeholder "Find..."}
+                                                   :set-styles {:width "100%"
+                                                                :margin-left 10
+                                                                :background :none
+                                                                :border :none}}]}
+                           :set-styles {:display :flex
+                                        :padding 15
+                                        :border-bottom "1px solid rgba(0,0,0,0.1)"
+                                        }}
+                          {:find-popup-results {}}
+                          {:w-p {:text "Press ↑↓ to select, ↵ to choose"}
+                           :set-styles {:font-size 12
+                                        ;:background "#f7f7f5"
+                                        :padding "5px 15px"
+                                        :margin 0
+                                        :color "#aaa"
+                                        :border-radius "0 0 3px 3px"
+                                        :border-top "1px solid rgba(0,0,0,0.1)"}}
+                          ]}
+              :set-styles {:width 500
+                           :height 300
+                           :box-shadow "0 6px 15px 0 rgba(0,0,0,0.4)"
+                           :display :flex
+                           :flex-direction :column
+                           :align-items :strech
+                           :border-radius 3
+                           :background "#f7f7f5"
+                           }}
+ :find-popup-results {:list-of {:items {0 {:name "header"}
+                                        1 {:name "label"}
+                                        2 {:name "button"}}
+                                :item-widget :find-popup-result
+                                }
+                      :set-styles {:flex-grow 1
+                                   :background "#fff"}}
+ :find-popup-result {:w-p {:text #ctx [:props :val :name]}
+                     :set-styles {:border-bottom "1px solid rgba(0,0,0,0.1)"
+                                  :margin 0
+                                  :padding "10px 10px 10px 50px"}}
+ }

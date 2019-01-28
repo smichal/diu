@@ -15,32 +15,32 @@
 
 (defn interceptors-execute-step [ctx]
   (let [stage (cond
-                (:error ctx) :error
-                (seq (:queue ctx)) :before
+                (::error ctx) :error
+                (seq (::queue ctx)) :before
                 :else :after)
-        col (if (= stage :before) :queue :stack)]
+        col (if (= stage :before) ::queue ::stack)]
     (if-let [next (peek (get ctx col))]
       (let [f (get next stage identity)
             ctx (if (= stage :before)
                   (-> ctx
-                      (update :queue pop)
-                      (update :stack conj next))
+                      (update ::queue pop)
+                      (update ::stack conj next))
                   (-> ctx
-                      (update :stack pop)))]
+                      (update ::stack pop)))]
         (try
           (f ctx)
           (catch js/Error e
             (-> ctx
-                (assoc :queue #queue [])
-                (assoc :error e)))))
+                (assoc ::queue #queue [])
+                (assoc ::error e)))))
       ctx)))
 
 (defn execute-interceptors [ctx ics]
-  (let [ctx (assoc ctx :queue (into #queue [] ics)
-                       :stack [])]
+  (let [ctx (assoc ctx ::queue (into #queue [] ics)
+                       ::stack [])]
     (loop [ctx ctx]
-      (if (or (seq (:queue ctx))
-              (seq (:stack ctx)))
+      (if (or (seq (::queue ctx))
+              (seq (::stack ctx)))
         (recur (interceptors-execute-step ctx))
         ctx))))
 
@@ -91,7 +91,7 @@
   ;(println "set-params-of-interceptor" inter params)
   (->> inter
        (map (fn [[k v]]
-              [k (fn [ctx] (v ctx (deref-props ctx params)))]))
+              [k (fn set-params-of-interceptor [ctx] (v ctx (deref-props ctx params)))]))
        (into {})))
 
 (declare deep-deref)
@@ -101,13 +101,17 @@
   (let [prev-props (atom nil)]
     {:before (fn call-interceptor-before [ctx]
                (reset! prev-props (:props ctx))
-               ;(println "call-interceptor" (deref-props ctx params))
-               (assoc ctx :props (deref-props ctx params)))
+               ;(println "call-interceptor" params)
+               (if (:app/merge-props params)
+                 (update ctx :props merge (deref-props ctx params))
+                 (assoc ctx :props (deref-props ctx params))))
      :after (fn call-interceptor-after [ctx]
+              ;(println "call-after" @prev-props)
               (-> ctx
-                  ;; fixme: ctx getteer passed to dom are derefed in wrong ctx
+                  ;; fixme: ctx getter passed to dom are derefed in wrong ctx
                   ;; but line below loops
                   ;(update :dom #(deep-deref ctx %))
+                  ;; => not deref diff nodes (childeren), only getter/full-vals
                   (assoc :props @prev-props)))}))
 
 (defn get-subparts [part parts-data]
@@ -117,15 +121,18 @@
         parts (or parts
                   (sort-by
                     #(- (or @(get-in parts-data [% :meta :priority]) 1))
-                    (keys part)))]
+                    (remove #{:meta} (keys part))))]
     (keep #(do [% (get part %)]) parts)))
+
+(defn get-part-as-map [ctx part]
+  (cond
+    (keyword? part) @(get-in ctx [:parts part])
+    (vector? part) @(get-in ctx (cons :parts part))
+    :else part))
 
 (defn get-interceptors [ctx part params]
   ;(println "get-interceptors" part params)
-  (let [part (cond
-               (keyword? part) @(get-in ctx [:parts part])
-               (vector? part) @(get-in ctx (cons :parts part))
-               :else part)]
+  (let [part (get-part-as-map ctx part)]
     (if-let [inter (:intercept part)]
       [(set-params-of-interceptor inter params)]
       (concat
@@ -149,6 +156,7 @@
 (defn deref-one [ctx v]
   (cond
     (implements? incr/INode v) @v
+    (implements? IDisplayable v) v
     (and (not (coll? v)) (not (keyword? v)) (ifn? v)) (v ctx)
     v v))
 
@@ -178,12 +186,14 @@
 ;(def render-widget-memo (second render-widget*))
 
 (defn name-extend [name key]
-  (str name "/" key))
+  (if key
+    (str name "/" key)
+    name))
 
 (def name->ctx (atom (sorted-map)))
 
 (defn render-child [key ctx widget params widget-path]
-  ;(println "render-child" key widget params)
+  (println "render-child" key widget params (implements? IDisplayable widget) (type widget))
   (let [widget (if (implements? IDisplayable widget)
                  (-display widget)
                  widget)
@@ -217,15 +227,17 @@
                              (:class x) (assoc :class (:class x))
                              (:styles x) (assoc :styles (:styles x))
                              (:value x) (assoc :value (:value x))
+                             (:attrs x) (assoc :attrs (:attrs x))
                              (:tag x) (assoc :tag (:tag x)
                                              :parent parent))]
     (apply concat
            (when-not (empty? node-changes) [[prefix node-changes]])
-           (->> (:children x)
-                (sort-by first)
-                (keep (fn [[k v]]
-                        (node prefix (name-extend prefix k) v)))
-                (not-empty)))))
+           (when (coll? (:children x))
+             (->> (:children x)
+                  (sort-by first)
+                  (keep (fn [[k v]]
+                          (node prefix (name-extend prefix k) v)))
+                  (not-empty))))))
 
 (defn flat-dom [c]
   (incr/diff-thunk

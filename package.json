@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "FIXME: Write a one-line description of your library/project.",
   "dependencies": {
-    "jss": "^9.8.7",
-    "jss-preset-default": "^4.5.0",
-    "lit-html": "^0.10.2",
-    "shadow-cljs": "^2.5.0"
+    "@mdi/svg": "^3.3.92",
+    "fela": "^10.0.0",
+    "fela-dom": "^10.0.0",
+    "fela-plugin-unit": "^10.1.0",
+    "shadow-cljs": "^2.7.14"
   },
   "devDependencies": {},
   "author": "",

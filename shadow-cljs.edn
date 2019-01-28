@@ -3,14 +3,21 @@
  ["src"]
 
  :dependencies
- [[io.replikativ/hasch "0.3.5"]
+ [[org.clojure/clojurescript "1.10.439"]
+
+  [io.replikativ/hasch "0.3.5"]
   [org.clojure/core.async  "0.4.474"]
   [cider/cider-nrepl "0.18.0"]
   [binaryage/devtools "0.9.10"]
-  [com.rpl/specter "1.1.1"]
-  [datascript "0.16.6"]
-  [mount "0.1.13"]
-  [binaryage/oops "0.6.2"]
+  [com.rpl/specter "1.1.2"]
+  [datascript "0.16.7"]
+  [mount "0.1.14"]
+  [binaryage/oops "0.6.3"]
+  [com.cognitect/transit-cljs "0.8.256"]
+  [mount "0.1.15"]
+
+  [org.clojure/test.check "0.10.0-alpha3"]
+
   ]
 
  :builds
@@ -24,10 +31,24 @@
         {:http-root "public"
          :http-port 8020}
         }
+  :app1 {:target :browser
+        :output-dir "public/js"
+        :asset-path "/js"
+        :modules
+        {:main ;; <- becomes public/js/main.js
+         {:entries [core.idom]}
+         :worker
+         {                                                  ;:entries [core.idom]
+          :depends-on #{:main}
+          :web-worker true}}
+        :devtools
+        {:http-root "public"
+         :http-port 8021}
+        }
   :my-tests
    {:target :browser-test
     :test-dir "out/demo-test-dummy"
-    :ns-regexp ".*"
+    :ns-regexp "incr"
     :devtools
     {:http-port 8606
      :http-root "out/demo-test-dummy"}}

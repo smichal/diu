@@ -4,6 +4,13 @@
             [clojure.test.check.generators :as gen]))
 
 
+(deftype Node [kind
+               ^:mutable parents
+               ^:mutable children
+               ^:mutable height
+               ^:mutable data
+               ])
+
 (defprotocol INode
   (-value [this])
   (-height [this])
@@ -11,8 +18,6 @@
   ;(remove-subscriber! [this s])
   )
 
-
-(defprotocol ICell)
 
 (deftype OutOfHeight [h])
 (deftype RestartStabilization [])
@@ -24,34 +29,54 @@
 
 (declare add-parent!)
 
-(declare current-time)
-
 (defn node-return-effects! [this]
   (when (and *height-limit*
              (<= *height-limit* (.-height this)))
-    ;(println "OutOfHeight." (.-height this) ">=" *height-limit*)
+    ;(println "OutOfHeight." (.-height this))
     ;; todo: set height and go on if it is first run (if no one higher depends on this)
-    ;; return value and height?
     (throw (OutOfHeight. (.-height this))))
 
   (when *parent-node*
     (when (add-parent! this *parent-node*)
       ;(js/console.log "RS" this *parent-node*)
       ;(js/console.trace)
-      ;(println "RestartStabilization." (.-recompute-time this) " at " @current-time)
-      ;; stabilize only to some height?
+      ;(println "RestartStabilization.")
       (throw (RestartStabilization.))))
 
   (when *referred-nodes*
     (vswap! *referred-nodes* conj this)))
 
-(declare iget)
+(declare thunk diff-thunk diff-val-thunk)
+;; fixme: gc old thunk
 
+;; val -> val
+(defn memo [f]
+  (memoize
+    (fn [& args]
+      (thunk (fn []
+               (apply f args))))))
+
+;; diff -> diff
+(defn diff-memo [f]
+  (memoize
+    (fn [& args]
+      (diff-thunk (fn []
+                    (apply f args))))))
+
+;; val -> diff
+(defn diff-val-memo [f]
+  (memoize
+    (fn [& args]
+      (diff-val-thunk (fn []
+                        (apply f args))))))
+
+(def iget
+  (memo (fn m-iget [m & args]
+          (apply get @m args))))
 
 (deftype Cell [^:mutable val
                ^:mutable parents
                ^:mutable change-time]
-  ICell
   INode
   (-value [this]
     (node-return-effects! this)
@@ -109,9 +134,7 @@
     ;(second (clojure.data/diff value diff))
     (->> diff
          (remove (fn [[k v]]
-                   (or (= v (get value k))
-                       (= v {})
-                       )))
+                   (= v (get value k))))
          (into {})))
   (-diff [a b]
     (if (::diff (meta b))
@@ -125,30 +148,19 @@
           (merge
             (->> deleted (map #(do [% ::deleted])) (into {}))
             (->> new (map #(do [% (b %)])) (into {}))
-            (->> common (keep #(let [av (a %)
-                                     bv (b %)]
-                                 (if (and (not= av bv)
-                                          (not (and (= bv {})
-                                                    (::diff (meta bv)))))
-                                   (let [diff (-diff av bv)]
-                                     ;(println "diff" av bv diff)
-                                     (when-not (= {} diff) #_(empty? diff) ; redundant?
-                                       [% diff])))))
-                 (into {}))))
+            (->> common (keep #(if (and (not= (a %) (b %))
+                                        (not (and (= (b %) {})
+                                                  (::diff (meta (b %))))))
+                                 [% (-diff (a %) (b %))])) (into {}))))
         {::diff true}))))
 
 (defn merge-diffs [ds]
   (reduce -patch ds))
 
-(defn mark-as-diff [v]
-  (if (implements? IDiffPatch v)
-    (with-meta v {::diff true})
-    v))
-
 (deftype DiffCell [^:mutable diffs
                    ^:mutable parents
                    ^:mutable change-time]
-  ICell
+
   INode
   (-value [this]
     (node-return-effects! this)
@@ -159,8 +171,7 @@
   IDiffNode
   (-diff-from [this time]
     (node-return-effects! this)
-    (mark-as-diff (or (merge-diffs (vals (subseq diffs >= time))) #_{}))
-    #_(with-meta
+    (with-meta
       (merge-diffs (vals (subseq diffs >= time)))
       {::diff true}))
 
@@ -215,34 +226,14 @@
 
 
 (defn add-parent! [node parent]
-  (let [was-empty? (empty? (.-parents node))
-        may-be-dirty? (and was-empty?
-                           (not (implements? ICell node)))]
+  (let [was-empty? (empty? (.-parents node))]
     (when-not (contains? (.-parents node) parent)
       (set! (.-parents node) (conj (.-parents node) parent))
-      (when may-be-dirty?
+      (when was-empty?
         ;(println "add-parent" (-height node) (-height parent))
-        (assert (< (-height node) (-height parent)))
         (to-dirty-nodes! [node])
         (doseq [n (.-children node)] (add-parent! n node))))
-    may-be-dirty?))
-
-(defn call-sub-thunk [key f & args]
-  (assert *parent-node*)
-  (let [[thunk prev-f prev-args _] (get (.-subcomputations *parent-node*) key)
-        new-thunk (when (or (not thunk)
-                            (not= prev-f f)
-                            (not= prev-args args))
-                    ;(js/console.log "XXX" (not= prev-f f) (not= prev-args args))
-                    ;(js/console.log "OLD THUNK" prev-f prev-args)
-                    ;(js/console.log "NEW THUNK" f args)
-                    (apply f args))
-        #_(when (and new-thunk thunk (implements? IDiffNode new-thunk))
-            (set! (.-value new-thunk) (.-value thunk)))
-        thunk (or new-thunk thunk)]
-    (set! (.-subcomputations *parent-node*)
-          (assoc (.-subcomputations *parent-node*) key [thunk f args @current-time]))
-    thunk))
+    was-empty?))
 
 (defn log [& args]
   (apply js/console.log args))
@@ -260,7 +251,7 @@
                 ^:mutable height
                 ^:mutable recompute-time
                 ^:mutable change-time
-                ^:mutable subcomputations]
+                ]
   INode
   (-height [_] height)
   (-value [this]
@@ -288,8 +279,7 @@
                     ^:mutable children
                     ^:mutable height
                     ^:mutable recompute-time
-                    ^:mutable change-time
-                    ^:mutable subcomputations]
+                    ^:mutable change-time]
   INode
   (-height [_] height)
   (-value [this]
@@ -302,23 +292,13 @@
   (-diff-from [this time]
     (node-return-effects! this)
     ;(log "-diff-from" time (subseq diffs >= time))
-    (let [ret (or (merge-diffs (vals (subseq diffs >= time))) {})]
-      (if (< (ffirst diffs) @current-time)
-        (mark-as-diff ret)
-        ret))
-
-    #_(with-meta
+    (with-meta
       (or (merge-diffs (vals (subseq diffs >= time))) {})
-      ;; not ^:diff for first (whole) value,
-      ;; could help when one DiffThunk changes to another (and both are part of map)
-      ;(when (< 1 (count diffs)) {::diff true})
       {::diff true}))
 
   IThunk
   (-recompute [this]
     ;(js/console.log "recompute-thunk! DIFF" this)
-    ;; fixme:  what if there are skipped changes before `recompute-time`?
-    ;; remember last fetch time for each child?
     (binding [*diff-from* (inc recompute-time)]
       (let [new-diff (if f-diff
                        (-reduce-diff value (f-diff))
@@ -327,9 +307,9 @@
                                   (pr-str v)
                                   (meta v)
                                   "=>" (-diff value v))
-                         (-diff value v)))
+                         (-diff value (f-val))))
+            ;new-diff (-reduce-diff value new-diff)
             ]
-        ;(println "new-diff" value (f-val) "=>" new-diff)
         (when new-diff
           (set! value (-patch value new-diff))
           (set! diffs (assoc diffs @current-time new-diff)))
@@ -341,12 +321,12 @@
   )
 
 (defn diff-thunk
-  ([v0 f] (DiffThunk. f nil (sorted-map 0 v0) v0 #{} #{} 1 -1 -1 nil))
-  ([f] (DiffThunk. f nil (sorted-map) nil #{} #{} 1 -1 -1 nil)))
+  ([v0 f] (DiffThunk. f nil (sorted-map 0 v0) v0 #{} #{} 1 -1 -1))
+  ([f] (DiffThunk. f nil (sorted-map) nil #{} #{} 1 -1 -1)))
 
 (defn diff-val-thunk
-  ([v0 f] (DiffThunk. nil f (sorted-map 0 v0) v0 #{} #{} 1 -1 -1 nil))
-  ([f] (DiffThunk. nil f (sorted-map) nil #{} #{} 1 -1 -1 nil)))
+  ([v0 f] (DiffThunk. nil f (sorted-map 0 v0) v0 #{} #{} 1 -1 -1))
+  ([f] (DiffThunk. nil f (sorted-map) nil #{} #{} 1 -1 -1)))
 
 (defn map-kv [im f ]
   ; f(k, iv)
@@ -365,11 +345,6 @@
 
   )
 
-(defn assert-min-height! [h nodes]
-  (doseq [node nodes]
-    (when (> h (.-height node))
-      (set! (.-height node) h))))
-
 (defn recompute-thunk! [t]
 
   (when (implements? IThunk t)
@@ -377,7 +352,7 @@
     ;(js/console.log "recompute-thunk!" t)
 
     (assert (.-parents t) "recompute only if has parents")
-    ;(assert (< (.-recompute-time t) @current-time) "never recompute twice in one cycle")
+    (assert (< (.-recompute-time t) @current-time) "never recompute twice in one cycle")
 
     (when (or (neg? (.-recompute-time t))
               (some #(> (.-change-time %) (.-recompute-time t))
@@ -390,20 +365,12 @@
             (set! (.-recompute-time t) @current-time)
             (when changed?
               (set! (.-change-time t) @current-time)
-              (assert-min-height! (inc (.-height t)) (.-parents t))
               (to-dirty-nodes! (.-parents t)))
             (let [old-children (.-children t)
                   new-children @*referred-nodes*
                   removed (clojure.set/difference old-children new-children)]
               (doseq [n removed] (remove-parent! n t))
-              (set! (.-children t) new-children))
-
-            ;; gc subcomputations
-            (set! (.-subcomputations t)
-                  (->> (.-subcomputations t)
-                       (filter (fn [[_ [_ _ _ time]]] (= time @current-time)))
-                       (into {})))
-            ))
+              (set! (.-children t) new-children))))
         (catch OutOfHeight e
           ;(println "OutOfHeight" (-height t) "=>" (inc (.-h e)))
           (set! (.-height t) (inc (.-h e)))
@@ -412,11 +379,11 @@
       )))
 
 (defn thunk [f]
-  (Thunk. f nil #{} nil 1 -1 -1 nil))
+  (Thunk. f nil #{} nil 1 -1 -1))
 
 (defn stabilize-to-height! [h]
   (loop [i 1]
-    ;(println "stabilize " i (aget dirty-nodes i))
+    ;(println "stabilize " i)
     (while (not (empty? (aget dirty-nodes i)))
       (let [t (first (aget dirty-nodes i))]
         (recompute-thunk! t)
@@ -426,99 +393,15 @@
       (recur (inc i)))
     ))
 
-(defn stabilize* []
+(defn stabilize! []
+  (log "stabilize!" dirty-nodes)
   (try
     (stabilize-to-height! 1000000)
     (catch RestartStabilization e
-      (stabilize*))))
-
-(defn stabilize! []
-  ;(log "stabilize!" dirty-nodes)
-  (stabilize*)
-  #_(try
-    (stabilize-to-height! 1000000)
-    (catch RestartStabilization e
       (stabilize!)))
-  ;(log "after stabilize!" dirty-nodes)
-  (swap! current-time inc))
+  (log "after stabilize!" dirty-nodes)
+  )
 
-
-(def scheduled? (atom false))
-(defn schedule-stabilization! []
-  (when-not @scheduled?
-    (reset! scheduled? true)
-    (js/setTimeout (fn []
-                     (reset! scheduled? false)
-                     (stabilize!))
-                   1)))
-
-
-;; depracated
-;; used only in i-get
-;; refactor, remove
-(defn memo-named-thunk* [thunk-constructor f]
-  (let [mem (atom {})
-        memo-name-atom (atom (sorted-map))]
-    [(fn [& args]
-       (let [k (some-> args first meta :incr/name)
-             [args-cell thunk] (if k (get @memo-name-atom k)
-                                     (get @mem args))]
-         ;(println "META :incr/name" (.-name f) (or (some-> args first meta :incr/name) args) thunk)
-         (if (nil? thunk)
-           (let [args-cell (cell args)
-                 thunk (thunk-constructor (fn [] (apply f @args-cell)))]
-             (if k
-               (swap! memo-name-atom assoc k [args-cell thunk])
-               (swap! mem assoc args [args-cell thunk]))
-             thunk)
-           (do
-             (cell-set! args-cell args)
-             ;(schedule-stabilization!)                      ;; fixme
-             (when k
-               (println "CHANGE " k (:props (first args))))
-             thunk))))
-     memo-name-atom
-     ]))
-
-(defn memo-named-thunk [thunk-constructor f]
-  (first (memo-named-thunk* thunk-constructor f)))
-
-(defn remove-memos-with-prefix [memo-name-atom prefix]
-  ;(println "remove-memos-with-prefix" prefix)
-  (let [ks (map first (subseq @memo-name-atom >= prefix <= (str prefix \uffff)))]
-    (swap! memo-name-atom (fn [m] (apply dissoc m ks)))))
-
-;; fixme: GC
-;; val -> val
-(defn memo* [f]
-  (memo-named-thunk* thunk f))
-
-(def memo
-  (comp first memo*))
-
-;; diff -> diff
-(defn diff-memo [f]
-  (memo-named-thunk diff-thunk f)
-  #_(memoize
-      (fn [& args]
-        (diff-thunk (fn []
-                      (apply f args))))))
-
-;; val -> diff
-(defn diff-val-memo [f]
-  (memo-named-thunk diff-val-thunk f))
-
-(defn diff-val-memo* [f]
-  (memo-named-thunk* diff-val-thunk f))
-
-(def iget
-  (memo (fn m-iget [m & args]
-          (apply get @m args))))
-
-
-(defn fmap [f & args]
-  (thunk (fn []
-           (apply f (map deref args)))))
 
 #_(defn -nodes-in-map [path m]
   (reduce-kv
@@ -545,6 +428,32 @@
                             res))
                         {}
                         thunk->path)))))))
+
+(comment
+  (defn const [v]
+    (Node.
+      :const
+      nil
+      nil
+      0
+      v))
+
+  (defn map1 [t f]
+    (Node.
+      :map
+      nil
+      #{t}
+      (inc (.-height t))
+      {:fn f}))
+
+  (defn map2 [t1 t2 f]
+    (Node.
+      :map2
+      nil
+      #{t1 t2}
+      (inc (max (.-height t1) (.-height t2)))
+      {:fn f})))
+
 
 
 

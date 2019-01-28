@@ -15,12 +15,12 @@
 (declare worker)
 
 (defn emit-event! [e]
-  (js/console.log e)
+  ;(js/console.log e)
   (.postMessage worker (t/write transit-w e)))
 
 (def EVENTS "abort abort abort afterprint animationend animationiteration animationstart audioprocess beforeprint beforeunload beginEvent blocked blur cached canplay canplaythrough change chargingchange chargingtimechange checking click close compassneedscalibration complete compositionend compositionstart compositionupdate contextmenu copy cut dblclick devicelight devicemotion deviceorientation deviceproximity dischargingtimechange downloading drag dragend dragenter dragleave dragover dragstart drop durationchange emptied ended ended endEvent error focus focusin focusout fullscreenchange fullscreenerror gamepadconnected gamepaddisconnected hashchange input invalid keydown keypress keyup languagechange The definition of 'NavigatorLanguage.languages' in that specification. levelchange load loadeddata loadedmetadata loadend loadstart message mousedown mouseenter mouseleave mousemove mouseout mouseover mouseup noupdate obsolete offline online open open orientationchange pagehide pageshow paste pause pointerlockchange pointerlockerror play playing popstate progress progress ratechange readystatechange repeatEvent reset resize scroll seeked seeking select show stalled storage submit success suspend SVGAbort SVGError SVGLoad SVGResize SVGScroll SVGUnload SVGZoom timeout timeupdate touchcancel touchend touchenter touchleave touchmove touchstart transitionend unload updateready upgradeneeded userproximity versionchange visibilitychange volumechange waiting wheel")
-(def events-per-elem (zipmap (clojure.string/split EVENTS #" ")
-                             (repeatedly #(js/WeakMap.))))
+(defonce events-per-elem (zipmap (clojure.string/split EVENTS #" ")
+                                 (repeatedly #(js/WeakMap.))))
 
 (defn dom-event-handler [e]
   (let [data (.get (events-per-elem (.-type e)) (.-currentTarget e))]
@@ -44,6 +44,9 @@
         (name type)
         dom-event-handler))))
 
+(defn maybe [x else]
+  (if (not= x ::incr/deleted) x else))
+
 (defn process-dom-change! [[id x]]
   (js/console.log "Apply diff" id x)
 
@@ -52,29 +55,36 @@
     (when-let [elem (js/document.getElementById id)]
       (.remove elem))
 
+    ;; todo: optimize, index of children/ids instead of scan
     (let [elem (js/document.createElement (name (:tag x)))]
       (set! (.-id elem) id)
       ;(js/console.log "get " (:parent x) (js/document.getElementById (:parent x)))
-      (.appendChild
-        (js/document.getElementById (:parent x))
-        elem)))
+      (let [parent (js/document.getElementById (:parent x))
+            children (js/Array.from (.-children parent))
+            before-node (first (filter #(< id (.-id %)) children))]
+        (.insertBefore parent elem before-node))
+
+      #_(.appendChild
+          (js/document.getElementById (:parent x))
+          elem)))
+
   (when (:text x)
     (let [elem (js/document.getElementById id)]
-      (set! (.-innerText elem) (:text x))))
+      (set! (.-innerText elem) (maybe (:text x) nil))))
 
   (when-let [cls (:class x)]
     (let [elem (js/document.getElementById id)]
-      (set! (.-className elem) cls)))
+      (set! (.-className elem) (maybe cls nil))))
 
   ;; todo, move to worker
-  (when-let [s (:styles x)]
+  (when-let [s (maybe (:styles x) {})]
     (let [elem (js/document.getElementById id)]
       (set! (.-className elem)
             (core.styles/render-rule elem s))))
 
   (when-let [v (:value x)]
     (let [elem (js/document.getElementById id)]
-      (set! (.-value elem) v)))
+      (set! (.-value elem) (maybe v nil))))
 
   (when-let [parent (:remove-from x)]
     (.remove (js/document.getElementById id))
@@ -83,7 +93,15 @@
       (js/document.getElementById id)))
 
   (when-let [events (:events x)]
-    (set-events! (js/document.getElementById id) events)))
+    (set-events! (js/document.getElementById id) (maybe events {})))
+
+  (when-let [attrs (maybe (:attrs x) {})]
+    (let [elem (js/document.getElementById id)]
+      ;; handle diffs
+      (doseq [[attr val] attrs]
+        (aset elem (name attr) val))))
+
+  )
 
 
 (defn init-dom-mutator! [worker]

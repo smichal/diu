@@ -2,10 +2,15 @@
   (:require [core.incr :as incr]
             [mount.core :as mount :refer [defstate]]
             [core.engine :as e]
-            core.events
+            [core.events :as events]
             core.styles
             [cljs.reader :as reader]
+            [goog.net.XhrIo :as xhr]
+    ;[clojure.browser.repl :as repl]
             clojure.string))
+
+#_(defonce conn
+         (repl/connect "http://localhost:9000/repl"))
 
 
 (def log js/console.log)
@@ -15,51 +20,73 @@
 
 (declare state-cell)
 
-(defn register-tag-reader! [tag f]
-  (swap! reader/*tag-table* assoc tag f))
+(events/register-effect-handler!
+  :set-local
+  (fn [ctx key val]
+    (incr/cell-set! (get ctx key) val)))
+
+(events/register-effect-handler!
+  :set-parts-val
+  (fn [_ widget part field val]
+    (incr/cell-swap! state-cell
+                     (fn [m]
+                       (assoc-in m (concat [:parts] widget [part field]) val)))))
+
+(events/register-effect-handler!
+  :remove-part
+  (fn [_ widget part]
+    (incr/cell-swap! state-cell
+                     (fn [m]
+                       (update-in m (concat [:parts] widget) dissoc part)))))
+
+(events/register-effect-handler!
+  :add-part
+  (fn [_ widget part]
+    (incr/cell-swap!
+      state-cell
+      (fn [m]
+        (assoc-in m
+                  (concat [:parts] widget [part]) {})))))
+
+(events/register-effect-handler!
+  :add-part-child
+  (fn [_ widget]
+    (incr/cell-swap!
+      state-cell
+      (fn [m]
+        (assoc-in m (concat [:parts] widget [:container :children (keyword (str "r" (rand-int 100)))])
+                  {:w-p {:text "new"}})))))
+(declare Expr)
+
 
 (defn update-widget! [e]
-  (incr/cell-swap! state-cell (fn [m]
-                                (assoc-in m (concat [:parts] (:widget e) [(:part e) (:field e)])
-                                          (reader/read-string (:event/value e)))))
-  (println "update-widget!" e))
+  (let [parse-fn (case (:parse e)
+                   :expr #(Expr. %)
+                   :edn cljs.reader/read-string
+                   :string str
+                   str)]
+    [:set-parts-val (:widget e) (:part e) (:field e) (parse-fn (:event/value e))]))
 
 (defn remove-part-from-widget! [e]
-  (incr/cell-swap! state-cell (fn [m]
-                                (update-in m (concat [:parts] (:widget e))
-                                           dissoc (:part e)))))
+  [:remove-part (:widget e) (:part e)])
 
 (defn add-part-to-widget! [e ctx]
-  (incr/cell-swap!
-    state-cell
-    (fn [m]
-      (assoc-in m
-                (concat [:parts] (:widget e) [(keyword @(:part-name ctx))])
-                {})))
-  (println "add part" (:widget e) @(:part-name ctx)))
+  [:add-part (:widget e) (keyword @(:part-name ctx))])
 
 (defn mouseover-widget [e ctx]
   (let [{:strs [top left width height]} (:event/bounding-rect e)
-        widget-path (:widget/path (@e/name->ctx (:event/target-id e)))
-        ]
-    (incr/cell-swap! (:frame-rect ctx)
-                     #(do [top left width height]))
-    (incr/cell-swap! (:mouseover-widget ctx) (fn [] widget-path))
-    ;(println "mouseover-widget" widget-path e)
-    ))
+        widget-path (:widget/path (@e/name->ctx (:event/target-id e)))]
+    [[:set-local :frame-rect [top left width height]]
+     [:set-local :mouseover-widget widget-path]]))
 
 (defn widget-selected [e ctx]
-  ;(println "widget-selected" e @(:mouseover-widget ctx))
-  (incr/cell-swap! (:in-edit ctx) (fn [] @(:mouseover-widget ctx))))
+  [:set-local :in-edit @(:mouseover-widget ctx)])
 
-(defn add-child! [e ctx]
-  (incr/cell-swap!
-    state-cell
-    (fn [m]
-      (assoc-in m (concat [:parts] (:widget e) [:container :children (keyword (str "r" (rand-int 100)))])
-                {:w-p {:text "new"}})
-      )))
+(defn add-child! [e _]
+  [:add-part-child (:widget e)])
 
+(defn set-input-val! [e ctx]
+  [:set-local (:cell e) (:event/value e)])
 
 (defn default-fields-editors [_ f]
   (get
@@ -67,14 +94,17 @@
      :edn :edn-prop-editor}
     f f))
 
-(defn set-input-val! [e ctx]
-  ;(println "a" (get ctx (:cell e)) (:event/value e))
-  (incr/cell-set! (get ctx (:cell e)) (:event/value e)))
+(defn icon-path [_ i]
+  (str "/icons/" i ".svg"))
+
+(defn register-tag-reader! [tag f]
+  (swap! reader/*tag-table* assoc tag f))
 
 (deftype Expr [js-text]
   e/IDisplayable
-  (e/-display [this]
-    {:w-p {:text js-text}})
+  (-display [this]
+    {:expr-label {:text js-text
+                  :app/merge-props true}})
   IFn
   (-invoke [this ctx]
     ((js/Function. "props" (str "return " js-text)) (clj->js (:props ctx))))
@@ -91,7 +121,7 @@
 
 (deftype CtxGetter [path]
   e/IDisplayable
-  (e/-display [this]
+  (-display [this]
     {:w-p {:text path}})
   Fn
   IFn
@@ -165,7 +195,32 @@
 (defn get-part-field-value-str [ctx widget part field]
   #_(incr/fmap pr-str
                (get-in % (concat [:parts] @(get-in % [:props :widget]) [(get-in % [:props :part]) (get-in % [:props :field])])))
-  (pr-str @(get-in ctx (concat [:parts] widget [part field]))))
+  @(get-in ctx (concat [:parts] widget [part field])))
+
+(defn box-type-for-prop-value [ctx widget part field]
+  ; thunk?
+  (let [v @(get-in ctx (concat [:parts]
+                               (value widget)
+                               [part field]))]
+    (cond
+      (implements? e/IDisplayable v) v                      ;(e/-display v)
+      (string? v) :string-prop-editor
+      :else :edn-prop-editor
+      )))
+
+(defn load-module [name cb]
+  (let [path (str "/data/" name "/ui.edn")
+        receiver (fn [event]
+                   (cb (cljs.reader/read-string (.getResponseText (.-target event)))))]
+    ;; add ns to ::keywords?
+    ;; load events, effects
+    (xhr/send path receiver "GET")))
+
+(defn load-module! []
+  (load-module "test_app"
+               (fn [parts]
+                 (incr/cell-swap! state-cell (fn [m] (update m :parts merge parts)))))
+  (incr/schedule-stabilization!))
 
 (def app
   {:app-preview {:w-p {:text "preview"}
@@ -175,26 +230,24 @@
    :test-items {:list-of {:items {0 0 1 1 2 42}
                           :item-widget :test-list-item}}
    :test-list-item {:w-p {:text (Expr. "'a' + props.val") #_(str "a" (get-in % [:props :val]))}}
-   :test-list-item2 {:w-p {:text (Expr. "'b' + props.val")}}
+   :test-list-item2 {:w-p {:text (gctx :props :key) #_(Expr. "'b' + props.val")}}
 
    :w1 {:set-styles {:display :grid
-                     :gridTemplateColumns "1fr 2fr 300px"
+                     :gridTemplateColumns "1fr 300px"
+                     :gridTemplateRows "40px 1fr"
                      :height "100vh"}
-        :local-state {:in-edit [:app-preview]
+        :local-state {;:in-edit [:app-preview]
+                      :in-edit [:test-list-item]
                       :frame-rect [0 0 0 0]
                       :mouseover-widget []}
         :container
-        {:children {:a {:container {:children [{:w-p {:text "=> a"}
-                                                :dom-events {:click {:event :set-local
-                                                                     :key :in-edit
-                                                                     :val [:test-items]}}
-                                                :order [:dom-events :w-p]}
-                                               {:w-p {:text "=> b"}
-                                                :dom-events {:click {:event :set-local
-                                                                     :key :in-edit
-                                                                     :val [:app-preview]}}
-                                                :order [:dom-events :w-p]}]}}
-                    :left :app'
+        {:children {:top-bar {:set-styles {:grid-column "1/3"
+                                           :grid-row "1/2"}
+                              :top-bar {}}
+                    :left {:set-styles {;:background "#e8e8e8"
+                                        ;:padding 15
+                                        }
+                           :container {:children {:mod {:load-module {}}}}}
                     :right {:widget-editor {:in-edit (gctx :in-edit)}}
                     :frame :hover-frame
                     }}
@@ -210,11 +263,11 @@
 
    :hover-frame {:set-styles {:position :absolute
                               :outline "1px solid #00e"
-                              :z-index -1
                               :top (gctx :frame-rect 0)
                               :left (gctx :frame-rect 1)
                               :width (gctx :frame-rect 2)
                               :height (gctx :frame-rect 3)
+                              :pointer-events "none"
                               }
                  :dom {:tag :div}}
 
@@ -222,6 +275,40 @@
                             :border-style "solid"
                             :border-color "#cec9c4"}
                :dom {:tag :hr}}
+
+   :top-bar {:set-styles {:background "#f7f7f5"
+                          :border-bottom "1px solid #e0e0e0"
+                          :display :flex
+                          :align-items :center}
+             :container {:children [{:icon {:icon "menu"}
+                                     :set-styles {:margin 10
+                                                  :opacity 0.3}}
+                                    {:icon {:icon "undo"}
+                                     :set-styles {:margin 10
+                                                  :opacity 0.3}}
+                                    {:icon {:icon "redo"}
+                                     :set-styles {:margin 10
+                                                  :opacity 0.3}}
+                                    {:dom {:tag :div}
+                                     :set-styles {:flex-grow 1}}
+                                    #_{:dom {:tag :div
+                                             :text "Action / find ..."}
+                                       :set-styles {:flex-grow 1
+                                                    :color "#999"
+                                                    :font-size 13
+                                                    :padding-bottom 5
+                                                    :text-transform :uppercase
+                                                    :border-bottom "1px solid #ccc"}}
+                                    #_{:dom {:tag :div}
+                                       :set-styles {:flex-grow 1}}
+                                    {:icon {:icon "database"}
+                                     :set-styles {:margin 10
+                                                  :opacity 0.3}}
+                                    {:icon {:icon "directions-fork"}
+                                     :set-styles {:margin 10
+                                                  :opacity 0.3}}
+                                    ]}
+             }
 
    :widget-editor {;:locals {:in-edit #(deref (get-in % [:props :in-edit]))}
                    :container
@@ -239,9 +326,8 @@
                    :events-handler {:update-widget (EventHandler. update-widget!)
                                     :remove-part-from-widget (EventHandler. remove-part-from-widget!)
                                     :add-child (EventHandler. add-child!)}
-                   :set-styles {:background-color "rgba(239,237,231,.5)"
-                                :border-left "1px solid #cec9c4"
-                                :padding "0 10px"}
+                   :set-styles {:background-color "#f7f7f5"
+                                :border-left "1px solid #e0e0e0"}
                    :order [:set-styles :events-handler :container]
                    }
 
@@ -256,59 +342,76 @@
 
    :part-editor-wrapper {:container
                          {:children
-                          [{:w-p {:text [(gctx :parts (gctx :props :part) :meta :name)
-                                         " ("
-                                         (gctx :props :part) ")"]}}
-                           {:link {:text "x"
+                          [{:link {:text "x"
                                    :click {:event :remove-part-from-widget
                                            :widget (gctx :props :widget)
-                                           :part (gctx :props :part)}}}
+                                           :part (gctx :props :part)}}
+                            :set-styles {:float :right
+                                         :color "#666"
+                                         :font-size 12}}
+                           {:w-p {:text ["\u2630 " (gctx :parts (gctx :props :part) :meta :name)]
+                                  #_[(gctx :parts (gctx :props :part) :meta :name) " (" (gctx :props :part) ")"]}
+                            :set-styles {:margin-top 0
+                                         :color "#888"
+                                         :text-transform "uppercase"
+                                         :font-size 12
+                                         }}
                            {:default-part-editor {:widget (gctx :props :widget)
                                                   :part (gctx :props :part)}}
-                           :separator
-                           ]}}
+                           ]}
+                         :set-styles {:padding 10
+                                      :border-bottom "1px solid #e0e0e0"}
+                         }
 
-   :default-part-editor {:container
-                         {:children
-                          [{:list-of {:item-widget :part-prop-editor
-                                      :items (gctx :parts (gctx :props :part) :meta :props) #_(get-in % [:parts (get-in % [:props :part]) :meta :props])
-                                      :key-field-name :field-name
-                                      :val-field-name :field-data
-                                      :common-props {:widget (gctx :props :widget)
-                                                     :part (gctx :props :part)}}}]}}
+   :default-part-editor {:list-of {:item-widget :part-prop-editor
+                                   :items (gctx :parts (gctx :props :part) :meta :props) #_(get-in % [:parts (get-in % [:props :part]) :meta :props])
+                                   :key-field-name :field
+                                   :val-field-name :field-data
+                                   :common-props {:widget (gctx :props :widget)
+                                                  :part (gctx :props :part)}}}
 
    :part-prop-editor {:container
                       {:children
                        [{:w-p {:text (gctx :props :field-data :label)}
                          :set-styles {:font-size 13
-                                      :margin-bottom 5}}
+                                      :margin-bottom 5
+                                      :color "#666"}}
                         {:call
-                         {:widget (calc default-fields-editors (gctx :props :field-data :type))
-                          :props {:widget (gctx :props :widget)
-                                  :part (gctx :props :part)
-                                  :field (gctx :props :field-name)}}}]}}
+                         {:widget (calc box-type-for-prop-value
+                                        (gctx :props :widget)
+                                        (gctx :props :part)
+                                        (gctx :props :field))
+                          ;(calc default-fields-editors (gctx :props :field-data :type))
+                          :props
+                          {:widget (gctx :props :widget)
+                           :part (gctx :props :part)
+                           :field (gctx :props :field)}}}]}}
 
    :log-params {:w-p {:text (gctx :props)}}
+
    :string-prop-editor {:input {:value (calc get-part-field-value-str
                                              (gctx :props :widget)
                                              (gctx :props :part)
                                              (gctx :props :field))}
-                        :set-styles {:width "100%"}
+                        :set-styles {:width "100%"
+                                     :background "none"
+                                     :border-width "0 0 1px 0"
+                                     :border-color "rgba(0,0,0,.25)"}
                         :dom-events {:keyup {:event :update-widget
+                                             :parse :string
                                              :widget (gctx :props :widget)
                                              :part (gctx :props :part)
-                                             :field (gctx :props :field)
-                                             }}}
+                                             :field (gctx :props :field)}}}
    :edn-prop-editor {:textarea {:value (calc get-part-field-value-str
                                              (gctx :props :widget)
                                              (gctx :props :part)
                                              (gctx :props :field))}
                      :set-styles {:width "100%"}
                      :dom-events {:keyup {:event :update-widget
+                                          :parse :edn
                                           :widget (gctx :props :widget)
                                           :part (gctx :props :part)
-                                          :field (gctx :props :field)
-                                          }}}
+                                          :field (gctx :props :field)}}}
    :children-prop-editor {:container
                           {:children
                            [{:list-of {:item-widget {:w-p {:text [(gctx :props :key) "=>" (gctx :props :val)]}}
@@ -319,6 +422,33 @@
                             {:button {:text "add child"
                                       :click {:event :add-child
                                               :widget (gctx :props :widget)}}}]}}
+
+   :expr-label {:container {:children {:i {:input {:value (gctx :props :text)}
+                                            :set-styles {:background "none"
+                                                         :color "#fff"
+                                                         :border "none"}
+                                            :dom-events {:keyup {:event :update-widget
+                                                                 :parse :expr
+                                                                 :widget (gctx :props :widget)
+                                                                 :part (gctx :props :part)
+                                                                 :field (gctx :props :field)}}}}}
+                 :set-styles {:background "#A26248"
+                              :display :inline-block
+                              :padding "5px 8px"
+                              :border-radius 3
+                              :font-size 13
+                              :font-family "Fira Code"
+                              :color "#fff"
+                              :box-shadow "0 2px 6px 0 rgba(0,0,0,0.2)"
+                              :width "100%"
+                              ":before" {:content "\"=>\""
+                                         :margin-right 8
+                                         :padding-right 8
+                                         :border-right "1px solid #ccc"}}}
+
+   :icon {:dom {:tag :img
+                :attrs {:src (calc icon-path (gctx :props :icon))}}
+          :meta {:priority 0}}
 
    })
 
@@ -348,33 +478,27 @@
                    :priority 0
                    ;:part-editor  :default-part-editor
                    }}
-      :input {:intercept {:after (fn [ctx params]
+      :input {:intercept {:after (fn input-after [ctx params]
+                                   ;(println "input" params (:props ctx))
                                    (if-let [bind (:bind-cell params)]
                                      (let [cell (get ctx bind)]
+                                       (assert (implements? incr/ICell cell))
                                        (-> ctx
-                                           (assoc :dom {:tag :input
+                                           (assoc :dom {:tag (or (:tag params) :input)
+                                                        :attrs {:placeholder (:placeholder params)}
                                                         :value cell})
                                            (core.events/add-handlers {:set-input-val set-input-val!})
                                            (core.events/add-events {:keyup {:event :set-input-val
                                                                             :cell bind}})
                                            ))
                                      (assoc ctx
-                                       :dom {:tag :input
+                                       :dom {:tag (or (:tag params) :input)
+                                             :attrs {:placeholder (:placeholder params)}
                                              :value (:value params)})))}
               :meta {:priority 0}}
-      :textarea {:intercept {:after (fn [ctx params]
-                                      (if-let [bind (:bind-cell params)]
-                                        (let [cell (get ctx bind)]
-                                          (-> ctx
-                                              (assoc :dom {:tag :textarea
-                                                           :value cell})
-                                              (core.events/add-handlers {:set-input-val set-input-val!})
-                                              (core.events/add-events {:keyup {:event :set-input-val
-                                                                               :cell bind}})
-                                              ))
-                                        (assoc ctx
-                                          :dom {:tag :textarea
-                                                :value (:value params)})))}
+      :textarea {:pass {:widget :input
+                        :props {:tag :textarea}
+                        :pass-props true}
                  :meta {:priority 0}}
 
       :button {:intercept {:after (fn [ctx params]
@@ -447,10 +571,34 @@
                        :priority 0}}
       :call {:intercept {:after (fn [ctx params]
                                   #_(println "CALL " params
-                                           (e/deref-one ctx (:widget params)))
+                                             (e/deref-one ctx (:widget params)))
                                   (assoc ctx :dom
                                              (e/render-child "call" ctx (e/deref-one ctx (:widget params)) (:props params) [:call :widget])))}
              :meta {:priority 0}}
+
+      :pass {:intercept {:before (fn pass-before [ctx params]
+                                   (update ctx ::e/queue into
+                                           (e/get-interceptors ctx
+                                                               (e/deref-one ctx (:widget params))
+                                                               (if (:pass-props params)
+                                                                 (merge (:props ctx) (:props params))
+                                                                 (:props params)))))
+                         ;:after
+                         #_(fn pass-after [ctx _]
+                             (js/console.log "PASS After" (::e/queue ctx) (::e/stack ctx))
+                             ctx)}
+             :meta {:priority 0}}
+
+      :pass-overwrite {:intercept {:before (fn [ctx params]
+                                             (update ctx ::e/queue into
+                                                     (e/get-interceptors ctx
+                                                                         (merge-with merge
+                                                                                     (e/get-part-as-map ctx
+                                                                                                        (e/deref-one ctx (:widget params)))
+                                                                                     (:overwrites params))
+                                                                         (:props params))))}
+                       :meta {:priority 0}}
+
 
       :local-state {:intercept
                     {:before (fn [ctx params]
@@ -471,12 +619,22 @@
                                  ctx
                                  params))}}
 
-      :locals {:intercept (fn [ctx params]
-                            ;(println "Locals" params)
-                            (reduce (fn [ctx [key val]]
-                                      (assoc-in ctx [:locals key] val))
-                                    ctx
-                                    params))}}}
+      :locals {:intercept {:before (fn [ctx params]
+                                     ;(println "Locals" params)
+                                     (reduce (fn [ctx [key val]]
+                                               (assoc-in ctx [:locals key] val))
+                                             ctx
+                                             params))}}
+      :load-module {:intercept {:before (fn [ctx params]
+                                          #_(-> ctx
+                                                (core.events/add-handlers {:load-module (EventHandler. load-module!)}))
+                                          (load-module!)
+                                          (assoc ctx :dom
+                                                     (e/render-child nil #_"submod" ctx :test_app nil [:load-module]))
+                                          )}
+                    :meta {:priority 0}}
+
+      }}
     {:parts app}))
 
 (def state-cell (incr/cell state-0))

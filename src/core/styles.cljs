@@ -4,7 +4,7 @@
             ["fela-dom" :refer (render)]
             ["fela-plugin-unit" :default unit]))
 
-(def renderer (createRenderer #js {;:devMode true
+(def renderer (createRenderer #js {:devMode true
                                    :plugins #js [(unit "px")]
                                    }))
 
@@ -13,7 +13,7 @@
    {:set-styles {:intercept {:after (fn [ctx params]
                                       ;(js/console.log "CSS" (clj->js params))
                                       ;(js/console.log "CSS2" (.renderRule renderer #(clj->js params)))
-                                      (assoc-in ctx [:dom :styles] params
+                                      (update-in ctx [:dom :styles] merge params
                                                 ;(.renderRule renderer #(clj->js params))
                                                 #_(incr/memo
                                                     (fn [ctx params]
