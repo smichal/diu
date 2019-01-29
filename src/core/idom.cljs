@@ -28,7 +28,9 @@
       (assoc data                                  ;:dom-event e
         :event/value (.-value (.-target e))
         :event/target-id (.-id (.-target e))
-        :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))))))
+        :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
+        :event/key-pressed (.-key e)
+        ))))
 
 (defn set-events! [elem events]
   (doseq [[type data] events

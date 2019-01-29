@@ -1,12 +1,18 @@
 {:test_app {:container {:children {:r0 :app-preview
                                    :r1 :test-items
-                                   :r2 :find-popup
+                                   :r3 {:container {}}
+                                   ;:r2
+                                   #_{:find-popup {:items [{:name "Header"}
+                                                           {:name "Label"}
+                                                           {:name "Button"}]}}
                                    }}
-            :set-styles {:padding 15}
-            ;:set-styles
-            #_{:background "#fff"
-               :box-shadow "0 4px 6px 0 rgba(0,0,0,0.2)"
-               :padding 15}
+            ;:set-styles {:padding 15}
+            :set-styles
+            {:background "#fff"
+             ;:box-shadow "0 4px 6px 0 rgba(0,0,0,0.2)"
+             :padding 15
+             :border "1px solid rgba(0,0,0,0.2)"
+             }
             :dom-events {:mouseover {:event :mouseover-widget}
                          :click {:event :widget-selected}}
             }
@@ -18,18 +24,25 @@
                :set-styles {:color "#888"}}
 
 
- :find-popup {:container
+ :find-popup {:order [:local-state :locals :events-handler :dom-events :set-styles :container]
+              :local-state {:selected ""
+                            :filter ""}
+              :locals {:items #calc["app.main.filter_items" [[:filter] [:props :items]]]
+                       }
+              :dom-events {:keydown {:event :keydown}}
+              :events-handler {:keydown #event-handler "app.main.ac_key_event"}
+              :container
               {:children [#_{:w-p {:text "Add new widget"}
-                           :set-styles {:padding "3px"
-                                        :margin 0
-                                        :text-align :center
-                                        :text-transform :uppercase
-                                        :color "#aaa"
-                                        :font-size 12
-                                        :border-bottom "1px solid rgba(0,0,0,0.1)"}}
+                             :set-styles {:padding "3px"
+                                          :margin 0
+                                          :text-align :center
+                                          :text-transform :uppercase
+                                          :color "#aaa"
+                                          :font-size 12
+                                          :border-bottom "1px solid rgba(0,0,0,0.1)"}}
                           {:container {:children [{:icon {:icon "magnify"}
                                                    :set-styles {:opacity 0.5}}
-                                                  {:input {:value ""
+                                                  {:input {:bind-cell :filter
                                                            :placeholder "Find..."}
                                                    :set-styles {:width "100%"
                                                                 :margin-left 10
@@ -39,7 +52,7 @@
                                         :padding 15
                                         :border-bottom "1px solid rgba(0,0,0,0.1)"
                                         }}
-                          {:find-popup-results {}}
+                          {:find-popup-results {:items #ctx [:items]}}
                           {:w-p {:text "Press ↑↓ to select, ↵ to choose"}
                            :set-styles {:font-size 12
                                         ;:background "#f7f7f5"
@@ -54,19 +67,17 @@
                            :box-shadow "0 6px 15px 0 rgba(0,0,0,0.4)"
                            :display :flex
                            :flex-direction :column
-                           :align-items :strech
                            :border-radius 3
                            :background "#f7f7f5"
                            }}
- :find-popup-results {:list-of {:items {0 {:name "header"}
-                                        1 {:name "label"}
-                                        2 {:name "button"}}
+ :find-popup-results {:list-of {:items #ctx [:props :items]
                                 :item-widget :find-popup-result
                                 }
                       :set-styles {:flex-grow 1
                                    :background "#fff"}}
  :find-popup-result {:w-p {:text #ctx [:props :val :name]}
                      :set-styles {:border-bottom "1px solid rgba(0,0,0,0.1)"
+                                  :background #calc["app.main.if_eq" [#ctx [:props :val] #ctx [:selected] "#ddd" ""]]
                                   :margin 0
                                   :padding "10px 10px 10px 50px"}}
  }

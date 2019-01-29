@@ -134,9 +134,11 @@
   ;(println "get-interceptors" part params)
   (let [part (get-part-as-map ctx part)]
     (if-let [inter (:intercept part)]
-      [(set-params-of-interceptor inter params)]
       (concat
-        (when (not (empty? params)) [(call-interceptor params)])
+        (when (:in-edit part) [(set-params-of-interceptor (:in-edit part) params)])
+        [(set-params-of-interceptor inter params)])
+      (concat
+        (when params #_(not (empty? params)) [(call-interceptor params)])
         (mapcat
           (fn [[part pparams]] (get-interceptors ctx part pparams))
           (get-subparts part (:parts ctx)))))))

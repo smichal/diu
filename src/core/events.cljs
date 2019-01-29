@@ -32,7 +32,8 @@
 
 (def app-cfg
   {:parts
-   {:events-handler {:intercept {:before add-handlers}}
+   {:events-handler {:intercept {:before add-handlers}
+                     :meta {:priority 2}}
     :dom-events {:intercept {:after (fn dom-events-after [ctx params]
                                       (println "dom-event" params)
                                       (add-events ctx params))}
@@ -41,7 +42,8 @@
                   :props {:click {:label "click"
                                   :type :edn}
                           :mouseover {:label "mouseover"
-                                      :type :edn}}}}}})
+                                      :type :edn}}
+                  :priority 1}}}})
 
 (declare execute-effects!)
 
@@ -69,11 +71,12 @@
 
 ;; as map?
 (defn execute-effects! [fxs ctx]
-  (let [fxs (if (vector? (first fxs)) fxs [fxs])]
-    (doseq [[fx & args] fxs]
-      ; try
-      (if-let [h (@effects-handlers fx)]
-        (do
-          ;(js/console.log "FX" fx args)
-          (apply h ctx args))
-        (js/console.warn "no handler for effect" fx)))))
+  (when fxs
+    (let [fxs (if (vector? (first fxs)) fxs [fxs])]
+      (doseq [[fx & args] fxs]
+        ; try
+        (if-let [h (@effects-handlers fx)]
+          (do
+            ;(js/console.log "FX" fx args)
+            (apply h ctx args))
+          (js/console.warn "no handler for effect" fx))))))
