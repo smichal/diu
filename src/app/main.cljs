@@ -41,12 +41,12 @@
 
 (events/register-effect-handler!
   :add-part
-  (fn [_ widget part]
+  (fn [_ widget part val]
     (incr/cell-swap!
       state-cell
       (fn [m]
         (assoc-in m
-                  (concat [:parts] widget [part]) {})))))
+                  (concat [:parts] widget [part]) val)))))
 
 (events/register-effect-handler!
   :add-part-child
@@ -77,7 +77,8 @@
   [:remove-part (:widget e) (:part e)])
 
 (defn add-part-to-widget! [e ctx]
-  [:add-part (:widget e) (keyword @(:part-name ctx))])
+  (let [[part val] (-> e :item :value first)]
+    [:add-part (:widget e) part val]))
 
 (defonce _conuter (atom 100)) ;; fixme
 (defn add-child-to-container [e ctx]
@@ -87,31 +88,80 @@
 (defn mouseover-widget [e ctx]
   (let [{:strs [top left width height]} (:event/bounding-rect e)
         widget-path (:widget/path (@e/name->ctx (:event/target-id e)))]
-    [[:set-local :frame-rect [top left width height]]
-     [:set-local :mouseover-widget widget-path]
-     [:set-local :mouseover-widget-name (:event/target-id e)]
-     ]))
+    (when (not= widget-path [:widget-placeholder])
+      [[:set-local :frame-rect [top left width height]]
+       [:set-local :mouseover-widget widget-path]
+       [:set-local :mouseover-widget-name (:event/target-id e)]])))
 
 (defn widget-selected [e ctx]
   [[:set-local :in-edit @(:mouseover-widget ctx)]
    [:set-local :in-edit-name @(:mouseover-widget-name ctx)]
    ])
 
+
+(def widgets-lib
+  [{:name "Header"
+    :desc "Text label styled as header."
+    :icon "format-header-1"
+    :value {:app/header {:text "Header" :size "3"}}}
+   {:name "Flex Rows Container"
+    :desc "Container of other widgets, each in one row."
+    :icon "reorder-horizontal"
+    :value {:container {}
+            :set-styles {:display :flex
+                         :flex-direction :column}}}
+   {:name "Flex Columns Container"
+    :desc "Container of other widgets, each in one column."
+    :icon "reorder-vertical"
+    :value {:container {}
+            :set-styles {:display :flex
+                         :flex-direction :row}}}
+   {:name "List of items"
+    :desc "Displays wigdet for each element of collection."
+    :icon "format-list-bulleted"
+    :value {:list-of {:item-widget :log-params
+                      :items {0 {:item 1} 1 {:item 2} 2 {:item 3}}}}}
+   {:name "Text Input"
+    :desc "Text input optionally with two-way binding to value cell."
+    :icon "cursor-text"
+    :value {:input {:value ""
+                    :placeholder "placeholder..."}}}
+   {:name "Button"
+    :desc "Button with on click action."
+    :icon "alpha-b-box-outline"
+    :value {:button {:text "button"}}}
+   {:name "Label" :icon "label-outline" :desc "Text label"}])
+
+(def parts-lib
+  [{:name "Local State"
+    :desc "Adds cells with local state to the widget."
+    :icon "database-plus"
+    :value {:local-state {}}}
+   {:name "Set Styles"
+    :desc "Allows to set styles (CSS) of widget."
+    :icon "language-css3"
+    :value {:set-styles {}}}
+   ])
+
+(defn show-new-part-popup [e ctx]
+  [:set-local :popup {:widget :find-popup
+                      :props {:items parts-lib
+                              :on-select {:event :add-part
+                                          :widget (:widget e)}
+                              }}])
+
 (defn show-new-widget-popup [e ctx]
   [:set-local :popup {:widget :find-popup
-                      :props {:items [{:name "Header" :value {:w-p {:text "Header"}}}
-                                      {:name "Label"}
-                                      {:name "Button"}]
+                      :props {:items widgets-lib
                               :on-select {:event :add-child-to-container
                                           :parent (:parent e)}
                               }}]
   )
 
-(defn in-edit? [ctx]
-  (incr/thunk (fn []
-                (and (:in-edit-name ctx)
-                     (= @(:in-edit-name ctx)
-                        (:incr/name (meta ctx)))))))
+(defn in-edit? [in-edit-cell widget-name]
+  (incr/thunk
+    (fn []
+      (= @in-edit-cell widget-name))))
 
 (defn in-editor? [ctx]
   (some? (:in-edit-name ctx)))
@@ -132,7 +182,7 @@
   (str "/icons/" i ".svg"))
 
 (defn register-tag-reader! [tag f]
-  (swap! reader/*tag-table* assoc tag f))
+  (swap! reader/*tag-table* assoc (symbol tag) f))
 
 (deftype Expr [js-text]
   e/IDisplayable
@@ -214,7 +264,7 @@
   (let [key (:event/key-pressed e)
         items (value (get-in ctx [:items]))
         selected (value (:selected ctx))
-        _ (println ":items " items ctx)
+        ;_ (println ":items " items ctx)
         prev (last (take-while #(not= selected %) items))
         next (last (take-while #(not= selected %) (reverse items)))
         effect (case key
@@ -224,14 +274,14 @@
                                                  :item selected)]
                               [:set-local :popup false]]
                      nil)]
-    (println "ch" effect (:selected ctx) selected)
+    ;(println "ch" effect (:selected ctx) selected)
     effect))
 (defn filter-items [ctx prefix items]
   (incr/thunk
     (fn []
       (let [prefix (get-in ctx prefix)
             items (get-in ctx items)]
-        (print "filter-items" prefix items (value prefix) (value items))
+        ;(print "filter-items" prefix items (value prefix) (value items))
         (if (empty? (value prefix))
           (value items)
           (filterv #(clojure.string/starts-with? (clojure.string/lower-case (:name %))
@@ -290,6 +340,9 @@
                  (incr/cell-swap! state-cell (fn [m] (update m :parts merge parts)))))
   (incr/schedule-stabilization!))
 
+(defn length=1 [_ x]
+  (= 1 (count x)))
+
 (def app
   {:app-preview {:w-p {:text "preview"}
                  :set-styles {:color "#888"}
@@ -311,8 +364,9 @@
                                                    {:name "Label"}
                                                    {:name "Button"}]}}
                       }
-        :events-handler {:add-child-to-container (EventHandler. add-child-to-container)}
-        :container {:children {:popup-wrapper {:if {:cond (gctx :popup :widget)}
+        :events-handler {:add-child-to-container (EventHandler. add-child-to-container)
+                         :add-part (EventHandler. add-part-to-widget!)}
+        :container {:children {:popup-wrapper {:when {:cond (gctx :popup :widget)}
                                                :popup-wrapper {:widget (gctx :popup :widget)
                                                                :props (gctx :popup :props)}}
                                :frame :hover-frame
@@ -326,15 +380,15 @@
                                            :grid-row "1/2"}
                               :top-bar {}}
                     :left {:set-styles {:background "#e5e5e5"
-                                        :padding 20
-                                        }
+                                        :padding 20}
                            :container {:children {:mod {:load-module {}
                                                         }}}}
                     :right {:widget-editor {:in-edit (gctx :in-edit)}}
                     }}
         :events-handler {:mouseover-widget (EventHandler. mouseover-widget)
                          :widget-selected (EventHandler. widget-selected)
-                         :show-new-widget-popup (EventHandler. show-new-widget-popup)}
+                         :show-new-widget-popup (EventHandler. show-new-widget-popup)
+                         :show-new-part-popup (EventHandler. show-new-part-popup)}
         :order [:local-state :set-styles :events-handler :container]
         }
 
@@ -404,10 +458,64 @@
                                 :justify-content :center
                                 :align-items :center}}
 
+   :link {:w-p {:text (gctx :props :text)}
+          :set-styles {:margin "0 10px"
+                       :padding "5px 0"
+                       :font-size 14
+                       :cursor :pointer
+                       :text-decoration :underline
+                       ":hover" {:background-color "#f0f0f0"}}
+          :dom-events {:click (gctx :props :click)}
+          :meta {:priority 0}}
+
+   :link' {:intercept {:after (fn [ctx params]
+                                (-> ctx
+                                    (assoc :dom {:tag :a
+                                                 :text (:text params)})
+                                    (core.events/add-events {:click (:click params)})))}
+           :meta {:priority 0}}
+
    :widget-editor {:container
                    {:children
-                    [{:w-p {:text (gctx :props :in-edit)}}
-                     {:add-part-to-widget {:widget (gctx :props :in-edit) #_(deref (get-in % [:props :in-edit]))}}
+                    [{:if {:cond (calc length=1 (gctx :props :in-edit))
+                           :then {:w-p {:text (gctx :props :in-edit 0)}
+                                  :set-styles {:color "#444"
+                                               :font-size 14
+                                               :font-family "Fira Code"
+                                               :background "#fcfcfc"
+                                               :border "1px solid #eee"
+                                               :margin "10px 10px"
+                                               :padding "5px 10px"
+                                               :border-radius 3}}
+                           :else {:container
+                                  {:children [{:w-p {:text "Unnamed widget"}
+                                               :set-styles {:color "#666"
+                                                            :font-size 14
+                                                            :font-family "Fira Code"
+                                                            :background "#fcfcfc"
+                                                            :border "1px solid #eee"
+                                                            :margin "10px 0px 5px"
+                                                            :padding "5px 10px"
+                                                            :border-radius 3}}
+                                              {:w-p {:text "Name it to simplify reusage."}
+                                               :set-styles {:font-family "system-ui"
+                                                            :margin "3px 10px"}}
+                                              {:w-p {:text (gctx :props :in-edit)}
+                                               :set-styles {:font-family "Fira Code"
+                                                            :font-size 7
+                                                            :margin-top 3
+                                                            :margin-left 10}}]}
+                                  :set-styles {:color "#888"
+                                               :font-size 12
+                                               :padding "0 10px"}}}}
+
+
+                     {:link {:text "Edit parent (⌘+P)"}}
+                     {:link {:text "Focus on this widget (⌘+F)"}}
+                     {:link {:text "Add new part to this widget (⌘+A)"
+                             :click {:event :show-new-part-popup
+                                     :widget (gctx :props :in-edit)}}}
+                     #_{:add-part-to-widget {:widget (gctx :props :in-edit) #_(deref (get-in % [:props :in-edit]))}}
 
                      {:list-of {:items (calc get-part (gctx :props :in-edit))
                                 #_(gctx :parts (gctx :props :in-edit))
@@ -415,7 +523,10 @@
                                 :common-props {:widget (gctx :props :in-edit) #_(deref (get-in % [:props :in-edit]))}
                                 :key-field-name :part
                                 :val-field-name :part-props
-                                :item-widget :part-editor-wrapper}}]}
+                                :item-widget :part-editor-wrapper}
+                      :set-styles {:border-top "1px solid #e0e0e0"
+                                   :margin-top 10}
+                      }]}
                    :events-handler {:update-widget (EventHandler. update-widget!)
                                     :remove-part-from-widget (EventHandler. remove-part-from-widget!)
                                     :add-child (EventHandler. add-child!)}
@@ -435,12 +546,12 @@
 
    :part-editor-wrapper {:container
                          {:children
-                          [{:link {:text "x"
-                                   :click {:event :remove-part-from-widget
-                                           :widget (gctx :props :widget)
-                                           :part (gctx :props :part)}}
+                          [{:link' {:text "x"
+                                    :click {:event :remove-part-from-widget
+                                            :widget (gctx :props :widget)
+                                            :part (gctx :props :part)}}
                             :set-styles {:float :right
-                                         :color "#666"
+                                         :color "#888"
                                          :font-size 12}}
                            {:w-p {:text ["\u2630 " (gctx :parts (gctx :props :part) :meta :name)]
                                   #_[(gctx :parts (gctx :props :part) :meta :name) " (" (gctx :props :part) ")"]}
@@ -571,6 +682,20 @@
                    :priority 0
                    ;:part-editor  :default-part-editor
                    }}
+
+      :app/header {:w-p {:text (gctx :props :text)}
+                   :set-styles {:color "#363636"
+                                :font-size "2rem"
+                                :font-weight 600
+                                :line-height 1.125}
+                   :meta {:name "Header"
+                          :doc "Header element with predefined styles"
+                          :props {:text {:label "Text"
+                                         :type :string}
+                                  :size {:label "Size"
+                                         :type :string}}
+                          :priority 0}}
+
       :input {:intercept {:after (fn input-after [ctx params]
                                    ;(println "input" params (:props ctx))
                                    (if-let [bind (:bind-cell params)]
@@ -578,7 +703,8 @@
                                        (assert (implements? incr/ICell cell))
                                        (-> ctx
                                            (assoc :dom {:tag (or (:tag params) :input)
-                                                        :attrs {:placeholder (:placeholder params)}
+                                                        :attrs {:placeholder (:placeholder params)
+                                                                :autofocus (:autofocus params)}
                                                         :value cell})
                                            (core.events/add-handlers {:set-input-val set-input-val!})
                                            (core.events/add-events {:keyup {:event :set-input-val
@@ -586,7 +712,8 @@
                                            ))
                                      (assoc ctx
                                        :dom {:tag (or (:tag params) :input)
-                                             :attrs {:placeholder (:placeholder params)}
+                                             :attrs {:placeholder (:placeholder params)
+                                                     :autofocus (:autofocus params)}
                                              :value (:value params)})))}
               :meta {:priority 0}}
       :textarea {:pass {:widget :input
@@ -597,18 +724,13 @@
       :button {:intercept {:after (fn [ctx params]
                                     (-> ctx
                                         (assoc :dom {:tag :button
-                                                     :text (:text params)})
+                                                     :text (:text params)
+                                                     :styles {}
+                                                     })
                                         (core.events/add-events {:click (:click params)})))}
                :meta {:priority 0
                       :props {:text {:label "Text" :type :string}
                               :click {:label "On click" :type :string}}}}
-
-      :link {:intercept {:after (fn [ctx params]
-                                  (-> ctx
-                                      (assoc :dom {:tag :a
-                                                   :text (:text params)})
-                                      (core.events/add-events {:click (:click params)})))}
-             :meta {:priority 0}}
 
       :dom {:intercept {:after (fn [ctx params]
                                  (assoc ctx
@@ -627,12 +749,18 @@
                                                     (into {}))
                                                #_(container-children (:children params))}))}
                   :in-edit {:after (fn [ctx params]
-                                     (when (in-editor? ctx)
-                                       (print "in edit" ctx))
-                                     (if (and (in-editor? ctx) #_(incr/call-sub-thunk :a in-edit? ctx)
-                                              (empty? (get-in ctx [:dom :children])))
-                                       (assoc-in ctx [:dom :children :placeholder]
-                                                 (e/render-child :placeholder ctx :widget-placeholder {:parent (:widget/path ctx)} nil))
+                                     #_(when (in-editor? ctx)
+                                         (print "in edit" ctx))
+                                     (if (and (in-editor? ctx)
+                                              (or (empty? (get-in ctx [:dom :children]))
+                                                  ;@(in-edit? ctx)
+                                                  @(incr/call-sub-thunk :in-edit-check
+                                                                        in-edit?
+                                                                        (:in-edit-name ctx)
+                                                                        (:incr/name (meta ctx)))
+                                                  ))
+                                       (assoc-in ctx [:dom :children :zplaceholder]
+                                                 (e/render-child :zplaceholder ctx :widget-placeholder {:parent (:widget/path ctx)} nil))
                                        ctx))}
                   :meta {:name "Container"
                          :props {:children {:label "Children list"
@@ -659,7 +787,7 @@
                                                                items (if (sequential? items)
                                                                        (zipmap (range) items)
                                                                        items)]
-                                                           (println "L" items params ctx)
+                                                           ;(println "L" items params ctx)
                                                            (->> items
                                                                 (map
                                                                   (fn [[k v]]
@@ -717,13 +845,13 @@
 
       :local-state {:intercept
                     {:before (fn [ctx params]
-                               (println "Local state" params)
+                               ;(println "Local state" params)
                                (let [ctx (reduce (fn [ctx [key val]]
-                                                   (assoc ctx key (incr/cell val)))
+                                                   (assoc ctx key (incr/call-sub-thunk key incr/cell val)))
                                                  ctx
                                                  params)
                                      ctx (core.events/add-handlers ctx {:set-local (fn [e]
-                                                                                     (println "EVENT 1" e (get ctx (:key e)))
+                                                                                     ;(println "EVENT 1" e (get ctx (:key e)))
                                                                                      (when-let [cell (get ctx (:key e))]
                                                                                        (incr/cell-set! cell (:val e))))})]
                                  ctx))
@@ -753,10 +881,14 @@
                                                      (e/render-child nil #_"submod" ctx :test_app nil [:load-module]))
                                           )}
                     :meta {:priority 0}}
+      :when {:intercept {:before (fn [ctx params]
+                                   (if (value (:cond params))
+                                     ctx
+                                     (assoc ctx ::e/queue #queue [])))}}
       :if {:intercept {:before (fn [ctx params]
                                  (if (value (:cond params))
-                                   ctx
-                                   (assoc ctx ::e/queue #queue [])))}}
+                                   (assoc ctx :dom (e/render-child "then" ctx (:then params) nil [:if :then]))
+                                   (assoc ctx :dom (e/render-child "else" ctx (:else params) nil [:if :else]))))}}
 
       }}
     {:parts app}))

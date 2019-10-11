@@ -43,9 +43,10 @@
                           {:container {:children [{:icon {:icon "magnify"}
                                                    :set-styles {:opacity 0.5}}
                                                   {:input {:bind-cell :filter
-                                                           :placeholder "Find..."}
+                                                           :placeholder "Find..."
+                                                           :autofocus true}
                                                    :set-styles {:width "100%"
-                                                                :margin-left 10
+                                                                :margin-left 15
                                                                 :background :none
                                                                 :border :none}}]}
                            :set-styles {:display :flex
@@ -53,17 +54,22 @@
                                         :border-bottom "1px solid rgba(0,0,0,0.1)"
                                         }}
                           {:find-popup-results {:items #ctx [:items]}}
-                          {:w-p {:text "Press ↑↓ to select, ↵ to choose"}
+                          {:container {:children [{:w-p {:text "Press ↑↓ to select, ↵ to choose"}
+                                                   :set-styles {:margin 0}}
+                                                  {:w-p {:text "Click to manage your parts library"}
+                                                   :set-styles {:text-align :right
+                                                                :flex-grow 1
+                                                                :margin 0}}]}
                            :set-styles {:font-size 12
                                         ;:background "#f7f7f5"
+                                        :display :flex
+                                        :flex-direction :row
                                         :padding "5px 15px"
-                                        :margin 0
                                         :color "#aaa"
                                         :border-radius "0 0 3px 3px"
                                         :border-top "1px solid rgba(0,0,0,0.1)"}}
                           ]}
               :set-styles {:width 500
-                           :height 300
                            :box-shadow "0 6px 15px 0 rgba(0,0,0,0.4)"
                            :display :flex
                            :flex-direction :column
@@ -73,11 +79,26 @@
  :find-popup-results {:list-of {:items #ctx [:props :items]
                                 :item-widget :find-popup-result
                                 }
-                      :set-styles {:flex-grow 1
+                      :set-styles {:height 300
+                                   :overflow :scroll
                                    :background "#fff"}}
- :find-popup-result {:w-p {:text #ctx [:props :val :name]}
-                     :set-styles {:border-bottom "1px solid rgba(0,0,0,0.1)"
+ :find-popup-result {:container
+                     {:children [{:icon {:icon #ctx [:props :val :icon]}
+                                  :set-styles {:opacity 0.4
+                                               :margin-right 15}}
+                                 {:container
+                                  {:children [{:w-p {:text #ctx [:props :val :name]}
+                                               :set-styles {:margin-bottom 0}}
+                                              {:w-p {:text #ctx [:props :val :desc]}
+                                               :set-styles {:font-size 12
+                                                            :margin-top 5
+                                                            :color "#777"
+                                                            }}
+                                              ]}}]}
+                     :set-styles {:display :flex
+                                  :flex-direction :row
+                                  :border-bottom "1px solid rgba(0,0,0,0.1)"
                                   :background #calc["app.main.if_eq" [#ctx [:props :val] #ctx [:selected] "#ddd" ""]]
                                   :margin 0
-                                  :padding "10px 10px 10px 50px"}}
+                                  :padding "5px 15px"}}
  }

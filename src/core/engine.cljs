@@ -195,7 +195,7 @@
 (def name->ctx (atom (sorted-map)))
 
 (defn render-child [key ctx widget params widget-path]
-  (println "render-child" key widget params (implements? IDisplayable widget) (type widget))
+  ;(println "render-child" key widget params (implements? IDisplayable widget) (type widget))
   (let [widget (if (implements? IDisplayable widget)
                  (-display widget)
                  widget)

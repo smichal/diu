@@ -50,7 +50,7 @@
   (if (not= x ::incr/deleted) x else))
 
 (defn process-dom-change! [[id x]]
-  (js/console.log "Apply diff" id x)
+  ;(js/console.log "Apply diff" id x)
 
   (when (:tag x)
     ;; todo: probably delete old node with that id if exists
@@ -101,7 +101,12 @@
     (let [elem (js/document.getElementById id)]
       ;; handle diffs
       (doseq [[attr val] attrs]
-        (aset elem (name attr) val))))
+        (aset elem (name attr) val))
+
+      (when (:autofocus attrs)
+        (.focus elem))
+
+      ))
 
   )
 

@@ -48,7 +48,7 @@
 (declare execute-effects!)
 
 (defn dispatch! [event]
-  ;(println "event" event)
+  (println "event" event)
   (loop [scope-id (::scope-id event)]
     (let [scope (@scopes scope-id)
           ctx (:ctx scope)
