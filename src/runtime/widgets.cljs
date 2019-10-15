@@ -3,7 +3,8 @@
             clojure.test.check.generators
             clojure.test.check.properties
             clojure.test.check
-            [incr.core :as incr]))
+            [incr.core :as incr]
+            [com.rpl.specter :as specter]))
 
 (s/def ::part
   (s/keys
@@ -30,6 +31,22 @@
 (s/def :part/params (s/map-of keyword? :part/param))
 (s/def :part/param (s/keys))
 
+(defprotocol IWithCtx
+  (-with-ctx [this ctx]))
+
+(deftype WithCtx [f]
+  IWithCtx
+  (-with-ctx [this ctx]
+    (f ctx)))
+
+(defn with-ctx [f] (WithCtx. f))
+
+(defn deep-ctx-apply [ctx x]
+  (specter/transform
+    (specter/walker #(implements? IWithCtx %))
+    #(-with-ctx % ctx)
+    x))
+
 (def parts (atom {}))
 
 (defn defpart [id & {:as m}]
@@ -55,27 +72,39 @@
 
 ;; parts from ctx?
 (defn compose-parts [ctx w]
-  ;(js/console.log "compose-parts" ctx w)
+  ;(js/console.log "compose-parts" w)
   (let [parts-defs (::parts ctx)
         part-calls (map-in-order w)
-        part-calls (map (fn [[id params]]
+        parts-num (count part-calls)
+        part-calls (map-indexed (fn [idx [id params]]
                           (let [part (get parts-defs id)]
-                            (when-not part (throw (js/Error. (str "Part not found: " id))))
-                           [part params]))
+                            (if-not part
+                              (if (not= idx (dec parts-num))
+                                (throw (js/Error. (str "Part not found: " id)))
+
+                                ;; widget can by called instead of part for last part
+                                [(get parts-defs :widget) {:widget id
+                                                           :params params}])
+                              [part params])))
                         part-calls)]
     (let [ctx (reduce
                 (fn [ctx [part params]]
                   (if-let [f (:part/augment-ctx part)]
-                    (f ctx params)
+                    (f ctx
+                       (deep-ctx-apply ctx params))
                     ctx))
                 ctx
                 part-calls)
           [last-part last-part-params] (last part-calls)
-          result ((:part/render last-part) ctx last-part-params) ;; auto resolve widget?
+          result ((:part/render last-part)
+                  ctx
+                  (deep-ctx-apply ctx last-part-params)) ;; auto resolve widget?
           result (reduce
                    (fn [result [part params]]
                      (if-let [f (:part/augment-result part)]
-                       (f ctx params result)
+                       (f ctx
+                          (deep-ctx-apply ctx params)
+                          result)
                        result))
                    result
                    (reverse part-calls))]
@@ -86,10 +115,30 @@
     (get-in ctx [::widgets widget-or-id])
     widget-or-id))
 
-(defn call [ctx w]
+(defn call [ctx w param-path]
   ;(js/console.log "CALL" w)
   (incr/deep-deref
-    @(incr/incr compose-parts ctx (incr/value w))))
+    @(incr/incr compose-parts
+                (update ctx ::param-path #(concat % param-path))
+                (incr/value w))))
 
 ;; :part/render (ctx: const), (params: (possible?) thunk)
 ;; children (id -> Thunk(x)) ?
+
+
+(deftype CtxGetter [path]
+ IWithCtx
+  (-with-ctx [this ctx]
+    (get-in ctx (deep-ctx-apply ctx path)))
+  ;Object
+  ;(toString [this] (pr-str path))
+  IEquiv
+  (-equiv [this other]
+    (= path (.-path other)))
+  ;IPrintWithWriter
+  ;(-pr-writer [_ writer _]
+  ;  (write-all writer "#ctx" (pr-str (vec path))))
+  )
+
+(defn gctx [& args]
+  (CtxGetter. args))

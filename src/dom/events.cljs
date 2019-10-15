@@ -12,6 +12,18 @@
   (.postMessage (aget js/window "__worker")
                 (t/write transit-w e)))
 
+(defn dom-event-handler [e]
+  (let [data (get
+               (.get events-per-elem (.-currentTarget e))
+               (keyword (.-type e)))]
+    (emit-event!
+      (assoc data                                  ;:dom-event e
+        :event/value (.-value (.-target e))
+        :event/target-id (.-id (.-target e))
+        :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
+        :event/key-pressed (.-key e)
+        ))))
+
 (defn add-event [elem type data replace?]
   (let [node-events (.get events-per-elem elem)
         node-events (assoc node-events type data)]
@@ -46,18 +58,6 @@
   (let [node-events (.get events-per-elem elem)]
     (doseq [[type _] node-events]
       (remove-event elem type))))
-
-(defn dom-event-handler [e]
-  (let [data (get
-               (.get events-per-elem (.-currentTarget e))
-               (keyword (.-type e)))]
-    (emit-event!
-      (assoc data                                  ;:dom-event e
-        :event/value (.-value (.-target e))
-        :event/target-id (.-id (.-target e))
-        :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
-        :event/key-pressed (.-key e)
-        ))))
 
 (add-diff-reducer
   :dom/events

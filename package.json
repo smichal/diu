@@ -4,10 +4,14 @@
   "description": "FIXME: Write a one-line description of your library/project.",
   "dependencies": {
     "@mdi/svg": "^3.3.92",
+    "@vaadin/vaadin": "^14.0.9",
+    "@webcomponents/webcomponentsjs": "^2.3.0",
     "fela": "^10.7.0",
     "fela-dom": "^10.7.0",
     "fela-plugin-unit": "^10.7.0",
-    "shadow-cljs": "^2.8.61"
+    "golden-layout": "1.5.9",
+    "shadow-cljs": "^2.8.61",
+    "zepto": "1.2.0"
   },
   "devDependencies": {},
   "author": "",

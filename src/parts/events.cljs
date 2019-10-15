@@ -11,10 +11,13 @@
   (fn [ctx params result]
     (update
       result :dom/events merge
-      (specter/transform
-        [specter/MAP-VALS]
-        #(assoc % ::scope-id (::scope-id ctx))
-        params))))
+      (->> params
+           (specter/setval
+             [specter/MAP-VALS nil?]
+             specter/NONE)
+           (specter/transform
+             [specter/MAP-VALS]
+             #(assoc % ::scope-id (::scope-id ctx)))))))
 
 (def event-scopes (atom {}))
 
@@ -64,4 +67,4 @@
           (do
             ;(js/console.log "FX" fx args)
             (apply h ctx args))
-          (js/console.warn "no handler for effect" fx))))))
+          (js/console.warn "no handler for effect" fx args))))))

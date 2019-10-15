@@ -3,6 +3,8 @@
             [dom.dom :as dom]
             dom.styles
             dom.events
+            dom.docker-layout
+            dom.vaadin-elements
             ))
 
 (def transit-w (t/writer :json))
@@ -13,27 +15,8 @@
                            (first attr-path)))
 (declare worker)
 
-
-(defmethod process-change :events [elem-ref elem-path attr-path op data]
-  (when (#{:+ :r} op)
-    (let [[_ type & data-path] attr-path]
-      (cond
-        (nil? type) (add-events elem-ref data (= op :r))
-        (nil? data-path) (add-event elem-ref type data (= op :r))
-        :else (change-event-data elem-ref type data-path data))))
-  (when (= :- op)
-    (let [[_ type & data-path] attr-path]
-      (cond
-        (nil? type) (remove-events elem-ref)
-        (nil? data-path) (remove-event elem-ref type)
-        :else nil ;; todo
-        ))))
-
-
 (defn process-dom-change! [[path op v]]
   (dom/apply-change {:node-path []} (concat [:dom/children :root] path) op v))
-
-
 
 (defn init-dom-mutator! [worker]
   (let [elem (js/document.createElement "div")]
@@ -44,7 +27,7 @@
 
   (set! (.-onmessage worker)
         (fn [e]
-          ;(js/console.log (t/read transit-r (.-data e)))
+          (js/console.log "diff" (t/read transit-r (.-data e)))
           ;(js/console.profile "render")
           (mapv process-dom-change! (t/read transit-r (.-data e)))
           ;(js/console.profileEnd "render")

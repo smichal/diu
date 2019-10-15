@@ -31,7 +31,11 @@
          :worker {:entries [runtime.worker] :depends-on #{:shared} :web-worker true}}
         :devtools
         {:http-root "public"
-         :http-port 8020}}
+         :http-port 8020}
+        :js-options
+        {:resolve {"golden-layout" {:target :global
+                                    :global "GoldenLayout"}}}
+        }
   :app1 {:target :browser
         :output-dir "public/js"
         :asset-path "/js"

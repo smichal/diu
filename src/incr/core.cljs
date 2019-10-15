@@ -165,7 +165,10 @@
     (reset! scheduled? true)
     (js/setTimeout (fn []
                      (reset! scheduled? false)
-                     (stabilize!))
+                     ;(js/console.profile "stabilize!")
+                     (stabilize!)
+                     ;(js/console.profileEnd "stabilize!")
+                     )
                    1)))
 
 (deftype IncrCell [^:mutable v]
@@ -176,6 +179,11 @@
   (-reset! [this new-val]
     (set! v new-val)
     (to-dirty-nodes! [[this]]))
+  ISwap
+  (-swap! [this f] (-reset! this (f v)))
+  (-swap! [this f a] (-reset! this (f v a)))
+  (-swap! [this f a b] (-reset! this (f v a b)))
+  (-swap! [this f a b xs] (-reset! this (f v a b xs)))      ;; apply??
   IIncr
   (calculate [this args state]
     [v v (not= state v)])

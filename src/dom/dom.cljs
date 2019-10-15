@@ -76,10 +76,13 @@
         ;path (if (= id :root) path (conj path id))
         ]
     (add-node! (conj node-path elem-id) elem)
+    (.append (get-node node-path) elem)
     (let [ctx (update ctx :node-path conj elem-id)]
-      (doseq [[k v] data]
+      (doseq [[k v] (->> data
+                         (sort-by (fn [[k v]] (get {:dom/styles -1 :docker-layout/root 2 :docker-layout/frames 3} k 0)))
+                         )]
         (apply-change ctx [k] :+ v)))
-    (.append (get-node node-path) elem)))
+    ))
 
 (defn add-children [ctx data]
   (doseq [[id desc] (map-indexed (fn [i x] [i x]) data)]
@@ -103,6 +106,7 @@
 (add-diff-reducer
   :dom/children
   (fn [ctx path op data]
+    ;(js/console.log ":dom/children" path op data)
     (match [path op]
       [[:root] :r] (add-child ctx :root data)
       [[elem-id] :+] (add-child ctx elem-id data)
@@ -122,3 +126,18 @@
   (fn [{:keys [node-path]} path op data]
     (set! (.-innerText (get-node node-path)) data)))
 
+(defn set-attr [elem attr val]
+  (if val
+    (.setAttribute elem attr val)
+    (.removeAttribute elem attr)
+    ))
+
+(add-diff-reducer
+  :dom/attrs
+  (fn [{:keys [node-path]} path op data]
+    (let [elem (get-node node-path)]
+      (match [path op]
+             [[] :+] (doseq [[k v] data]
+                       (set-attr elem (name k) (and v (name v))))
+             [[k] _] (set-attr elem (name k) (and data (name data)))
+             ))))

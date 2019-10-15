@@ -8,6 +8,8 @@
     parts.base
     parts.events
     parts.styles
+    parts.docker-layout
+    editor.widgets
     ))
 
 (println "worker started")
@@ -38,39 +40,56 @@
 (parts.events/register-effect-handler!
   :test
   (fn [ctx d]
-    (println "TT" ctx d)
+    ;(println "TT" ctx d)
     (reset! c {:a (rand-int 100) :b 4 :c 1})
     )
   )
 
+
+(def widgets
+  {
+   :test-app
+   {:events-handler {
+                     :button-clicked (fn [e ctx]
+                                       ;(println e ctx)
+                                       [[:test {:test 1}]])
+                     }
+    :dom {:tag :div
+          :children
+          [{:set-styles {:color (incr/thunk (if (= 1 @(incr/incr get c :c)) "red" "green"))}
+            :dom {:tag :p
+                  :text (incr/incr get c :a)}}
+           {:dom {:tag :p
+                  :text (incr/incr get c :b)}}
+           {:dom-events {:click {:event :button-clicked}}
+            :dom {:tag :button
+                  :text "button"}}
+           {:button {:theme :primary
+                     :onclick {:event :button-clicked}}}]}}
+
+
+   })
+
 (def app
-  (incr/cell {:events-handler {
-                               :button-clicked (fn [e ctx]
-                                                 (println e ctx)
-                                                 [[:test {:test 1}]])
-                               }
-              :dom {:tag :div
-                    :children
-                    [{:set-styles {:color (incr/thunk (if (= 1 @(incr/incr get c :c)) "red" "green"))}
-                      :dom {:tag :p
-                            :text (incr/incr get c :a)}}
-                     {:dom {:tag :p
-                            :text (incr/incr get c :b)}}
-                     {:dom-events {:click {:event :button-clicked}}
-                      :dom {:tag :button
-                            :text "button"}}
-                     ]}}))
+  {:widget {:widget :editor-app
+            :params {:app-in-edit :test-app}}})
+
+(def widgets-cell
+  (incr/cell (merge widgets
+                    editor.widgets/widgets)))
 
 (def d
   (incr/incr
     emit-widget
-    {::w/parts @w/parts}
-    app))
+    (incr/thunk
+      {::w/parts @w/parts
+       ::w/widgets @widgets-cell})
+    (incr/cell app)))
 
 @d
 (incr/stabilize!)
 
-(js/setTimeout
+#_(js/setTimeout
   (fn []
     (reset! c {:a 1 :b 4 :c 1})
     ;(swap! app update-in [:dom :children :c :dom :text] #(str % "#"))
@@ -78,7 +97,7 @@
     )
   5000)
 
-(js/setTimeout
+#_(js/setTimeout
   (fn []
     (reset! c {:a 1 :b 4 :c 2})
     ;(swap! app update-in [:dom :children :c :dom :text] #(str % "#"))
