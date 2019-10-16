@@ -12,6 +12,7 @@
 
 (defn get-node
   ([path node]
+   ;(js/console.log "get-node" node path)
    (loop [[a & rest] path
           node node]
      (if a
@@ -29,18 +30,21 @@
   (fv/catvec (fv/subvec v 0 i) (fv/subvec v (inc i))))
 
 (defn inset-ref [node [a & rest] ref]
-  (if a
+  (if (seq rest)
     (Node. (.-ref node)
            (update
              (or (.-children node)
                  (if (number? a) (fv/vector) {}))
              a
              #(inset-ref % rest ref)))
-    (Node. ref nil)))
+    (Node. (.-ref node)
+           (if (number? a)
+             (fv-insert (.-children node) a (Node. ref nil))
+             (assoc (.-children node) a (Node. ref nil))))))
 
 
-(defn remove-ref [node [a b & rest]]
-  (if b
+(defn remove-ref [node [a & rest]]
+  (if (seq rest)
     (Node. (.-ref node)
            (update
              (.-children node)
@@ -61,6 +65,7 @@
     (Node. (.-ref node) nil)))
 
 (defn add-node! [path ref]
+  ;(js/console.log "add-node!" path)
   (swap! dom-refs inset-ref path ref))
 
 (defn add-diff-reducer [key f]
@@ -89,9 +94,10 @@
     (add-child ctx id desc)))
 
 (defn remove-child [{:keys [node-path]} elem-id]
-  (swap! dom-refs remove-ref (conj node-path elem-id))
+  ;(js/console.log "remove-child" node-path elem-id)
   (let [elem (get-node (conj node-path elem-id))]
-    (.remove elem)))
+    (.remove elem))
+  (swap! dom-refs remove-ref (conj node-path elem-id)))
 
 (defn remove-children [{:keys [node-path]}]
   (swap! dom-refs remove-refs node-path)
@@ -141,3 +147,8 @@
                        (set-attr elem (name k) (and v (name v))))
              [[k] _] (set-attr elem (name k) (and data (name data)))
              ))))
+
+(add-diff-reducer
+  :dom/call-id
+  (fn [{:keys [node-path]} path op data]
+    (set-attr (get-node node-path) "data-id" data)))

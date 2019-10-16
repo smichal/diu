@@ -8,7 +8,7 @@
   {
    :editor-app
    {:set-styles {:height "100vh"}
-    :locals {:widget-in-edit [:test-app :dom :children 2]}
+    :local-state {:widget-in-edit [:test-app :dom :children 2]}
 
     :docker-layout {:layout {:type :row
                              :content [{:type :component
@@ -18,8 +18,12 @@
                                        {:type :component
                                         :id :properties-pane
                                         :componentName "frame"}]}
-                    :frames {:editor-pane {:widget {:widget (w/gctx :params :app-in-edit)}}
-                             :properties-pane {:widget-properties {:widget-in-edit (w/gctx :scope :widget-in-edit)}}}}}
+                    :frames {:editor-pane
+                             {:app-in-edit-wrapper
+                              {:app-in-edit (w/gctx :params :app-in-edit)}}
+                             :properties-pane
+                             {:widget-properties
+                              {:widget-in-edit (w/gctx :scope :widget-in-edit)}}}}}
 
    :button {:dom-events {:click (w/gctx :params :onclick)}
             :dom {:tag "vaadin-button"
@@ -48,12 +52,12 @@
    {:v-layout [{:dom {:tag :h5 :text "widget"}}
                {:set-styles {:font-size "var(--lumo-font-size-s)"
                              :font-family "Fira Code"}
-                :dom {:tag :p :text (w/gctx :params :widget-in-edit)}}
+                :dom {:tag :p :text (w/with-ctx #(incr/incr str (get-in % [:params :widget-in-edit])))}}
                {:set-styles {:font-size "var(--lumo-font-size-s)"
                              :font-family "Fira Code"}
-                :dom {:tag :p :text (w/with-ctx #(get-in (::w/widgets %) (get-in % [:params :widget-in-edit])))}}
+                :dom {:tag :p :text (w/with-ctx #(incr/incr str (incr/incr get-in (::w/widgets %) (get-in % [:params :widget-in-edit]))))}}
 
-               {:list-of {:items (w/with-ctx #(get-in (::w/widgets %) (get-in % [:params :widget-in-edit])))
+               {:list-of {:items (w/with-ctx #(incr/incr get-in (::w/widgets %) (get-in % [:params :widget-in-edit])))
                           :item-widget :part-properties-section
                           :param-for-key :part-id
                           :param-for-value :props
@@ -63,11 +67,12 @@
                ]}
 
    :part-properties-section
-   {:events-handler {:field-changed (fn [event ctx]
+   {:locals {:part-id (w/gctx :params :part-id)}
+    :events-handler {:field-changed (fn [event ctx]
                                       (if-let [v (try (cljs.reader/read-string (:event/value event))
                                                       (catch js/Error e nil))]
-                                        [[:change-widget {:widget (get-in ctx [:params :widget])
-                                                          :part (get-in ctx [:params :part-id])
+                                        [[:change-widget {:widget (incr/value (get-in ctx [:scope :widget-in-edit]))
+                                                          :part (get-in ctx [:scope :part-id])
                                                           :field (:field event)
                                                           :value v}]]))}
     :v-layout
@@ -87,6 +92,18 @@
                            :field (w/gctx :params :label)
                            }}}
 
+
+   :app-in-edit-wrapper
+   {:local-state {:edit-mode false}
+    :events-handler {:select-widget (fn [event ctx]
+                                      (when (:event/meta-key event)
+                                        [:set-local :widget-in-edit (::w/param-path (@w/call-id->ctx (js/parseInt (:event/target-call-id event))))]
+                                        ))}
+    :dom-events {:click {:event :select-widget}}
+    :dom {:tag :div
+          :children [{:widget {:widget (w/gctx :params :app-in-edit)}}]}}
+   ;:order [:events-handler :dom-events]
+
    })
 
 
@@ -96,9 +113,13 @@
     (js/console.log "FX" :change-widget args)
     (swap! runtime.worker/widgets-cell
            assoc-in
-           (concat (:widget args) [(:part args) (:field args)])
+           (concat (incr/value (:widget args)) [(:part args) (:field args)])
            (:value args)
-           )
+           )))
 
-    )
-  )
+(e/register-effect-handler!
+  :set-local
+  (fn [ctx field value]
+    (js/console.log "FX" :set-local field value)
+    (reset! (get-in ctx [:scope field]) value)
+    ))

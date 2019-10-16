@@ -75,15 +75,17 @@
             :params {:app-in-edit :test-app}}})
 
 (def widgets-cell
-  (incr/cell (merge widgets
-                    editor.widgets/widgets)))
+  (incr/cell
+    (w/with-path-annotation
+      []
+      (merge widgets ; todo with-path-annotation only for app in edit
+             editor.widgets/widgets))))
 
 (def d
   (incr/incr
     emit-widget
-    (incr/thunk
-      {::w/parts @w/parts
-       ::w/widgets @widgets-cell})
+    {::w/parts @w/parts
+     ::w/widgets widgets-cell}
     (incr/cell app)))
 
 @d

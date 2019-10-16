@@ -7,10 +7,13 @@
   :part/render
   (fn [ctx params]
     (cond->
-      {:dom/tag (:tag params)}
+      {:dom/tag (:tag params)
+       :dom/call-id (:runtime.widgets/call-id ctx) ;; only for editor
+       }
       (:text params) (assoc :dom/text (:text params))
       (:children params) (assoc :dom/children (mapv
-                                                #(incr/incr call ctx %)
+                                                (fn [x]
+                                                  (incr/incr call ctx x))
                                                 (incr/value (:children params))))
       (:attrs params) (assoc :dom/attrs (:attrs params))
       )))
@@ -19,10 +22,12 @@
   :widget
   :part/render
   (fn [ctx {:keys [widget params]}]
+    ;; todo: incr?
     (incr/incr
       call
       (assoc ctx :params params)
-      (resolve-widget ctx widget))))
+      (resolve-widget ctx widget)
+      )))
 
 (defpart
   :local-state
@@ -56,6 +61,7 @@
                                                           (assoc (or common-params {})
                                                             param-for-key k
                                                              param-for-value v))
-                                               (resolve-widget ctx item-widget)))
+                                               (resolve-widget ctx item-widget)
+                                               ))
                                   (incr/value items))}
                  ))

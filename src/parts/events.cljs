@@ -1,7 +1,7 @@
 (ns parts.events
   (:require [incr.core :as incr]
-            [com.rpl.specter :as specter])
-  (:use [runtime.widgets :only [defpart]]))
+            [com.rpl.specter :as specter]
+            [runtime.widgets :refer [defpart] :as w]))
 
 ;;; events
 
@@ -14,39 +14,25 @@
       (->> params
            (specter/setval
              [specter/MAP-VALS nil?]
-             specter/NONE)
-           (specter/transform
-             [specter/MAP-VALS]
-             #(assoc % ::scope-id (::scope-id ctx)))))))
-
-(def event-scopes (atom {}))
+             specter/NONE)))))
 
 (defpart
   :events-handler
   :part/augment-ctx
   (fn [ctx handlers]
-    (let [sid (hash handlers)
-          s {:handlers handlers
-             :ctx ctx
-             :parent (get ctx ::scope-id)}]
-      (swap! event-scopes assoc sid s)
-      (assoc ctx ::scope-id sid))))
-
+    (update ctx ::handlers merge handlers)))
 
 (declare execute-effects!)
 
 (defn dispatch! [event]
-  (println "event" event)
-  (loop [scope-id (::scope-id event)]
-    (let [scope (@event-scopes scope-id)
-          ctx (:ctx scope)
-          handler (get-in scope [:handlers (:event event)])]
-      ;(println scope)
-      (if handler
-        (execute-effects! (handler event ctx) ctx)
-        (if-let [parent (:parent scope)]
-          (recur parent)
-          (js/console.warn "event without handler" event))))))
+  (let [ctx (@w/call-id->ctx (js/parseInt (:event/elem-call-id event)))
+        handler (get-in ctx [::handlers (:event event)])]
+
+    (js/console.log "event" event ctx)
+
+    (if handler
+      (execute-effects! (handler event ctx) ctx)
+      (js/console.warn "event without handler" event))))
 
 
 (def effects-handlers (atom {}))

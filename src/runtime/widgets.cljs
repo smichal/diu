@@ -43,7 +43,7 @@
 
 (defn deep-ctx-apply [ctx x]
   (specter/transform
-    (specter/walker #(implements? IWithCtx %))
+    (specter/codewalker #(implements? IWithCtx %))
     #(-with-ctx % ctx)
     x))
 
@@ -70,9 +70,15 @@
       (map (fn [k] [k (m k)]) order)
       (map (fn [k] [k (m k)]) not-ordered))))
 
+(def call-id->ctx (atom {}))
+(def last-call-id (atom 0))
+(defn next-call-id [] (swap! last-call-id inc))
+
+(declare call resolve-widget)
+
 ;; parts from ctx?
 (defn compose-parts [ctx w]
-  ;(js/console.log "compose-parts" w)
+  ;(js/console.log "compose-parts" (::param-path ctx)  w ctx)
   (let [parts-defs (::parts ctx)
         part-calls (map-in-order w)
         parts-num (count part-calls)
@@ -82,11 +88,22 @@
                               (if (not= idx (dec parts-num))
                                 (throw (js/Error. (str "Part not found: " id)))
 
-                                ;; widget can by called instead of part for last part
-                                [(get parts-defs :widget) {:widget id
-                                                           :params params}])
+                                ;; widget can be called instead of part for last part
+
+                                [(get parts-defs :widget)
+                                 {:widget id :params params}])
                               [part params])))
-                        part-calls)]
+                        part-calls)
+        call-id (next-call-id)
+        ctx (assoc ctx
+              ;::parent-call-id (::call-id ctx) ;; passing call-id from parent causes additional calls to subcomponents
+              ::call-id call-id)
+        ]
+
+    @(incr/incr (incr/on-destroy (fn []
+                                   ;(js/console.log "DESTROY" call-id)
+                                   (swap! call-id->ctx dissoc call-id))))
+
     (let [ctx (reduce
                 (fn [ctx [part params]]
                   (if-let [f (:part/augment-ctx part)]
@@ -95,6 +112,9 @@
                     ctx))
                 ctx
                 part-calls)
+
+          _ (swap! call-id->ctx assoc call-id ctx)
+
           [last-part last-part-params] (last part-calls)
           result ((:part/render last-part)
                   ctx
@@ -112,15 +132,29 @@
 
 (defn resolve-widget [ctx widget-or-id]
   (if (keyword? widget-or-id)
-    (get-in ctx [::widgets widget-or-id])
+    (incr/incr get (::widgets ctx) widget-or-id)
     widget-or-id))
 
-(defn call [ctx w param-path]
+(defn spy [msg x]
+  (js/console.log msg x)
+  x)
+
+(defn call [ctx w]
   ;(js/console.log "CALL" w)
-  (incr/deep-deref
-    @(incr/incr compose-parts
-                (update ctx ::param-path #(concat % param-path))
-                (incr/value w))))
+
+  (try
+    (incr/deep-deref
+      @(incr/incr compose-parts
+                  (-> ctx
+                      (assoc ::param-path (:path (meta w)))
+                      (dissoc ::call-id))
+                  (incr/value w)))
+    (catch js/Error e
+      (js/console.error e)
+      {:dom/tag :div
+       :dom/text (pr-str e)}
+      )
+    ))
 
 ;; :part/render (ctx: const), (params: (possible?) thunk)
 ;; children (id -> Thunk(x)) ?
@@ -142,3 +176,21 @@
 
 (defn gctx [& args]
   (CtxGetter. args))
+
+
+(defn with-path-annotation [prefix m]
+  (if (implements? IMeta m)
+    (vary-meta
+      (cond
+        (map? m)
+        (->> m
+             (map (fn [[k v]]
+                    [k (with-path-annotation (conj prefix k) v)]))
+             (into {}))
+        (vector? m)
+        (vec (map-indexed (fn [i x] (with-path-annotation (conj prefix i) x)) m))
+        :else
+        m)
+      assoc
+      :path prefix)
+    m))

@@ -237,7 +237,11 @@
   (destroy [this])
   )
 
-
+(defn on-destroy [f]
+  (reify
+    IIncr
+    (calculate [this args state] [nil nil false])
+    (destroy [this] (f))))
 
 #_(def aaa
   (reify IIncr

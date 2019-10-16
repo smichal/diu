@@ -13,15 +13,18 @@
                 (t/write transit-w e)))
 
 (defn dom-event-handler [e]
-  (let [data (get
+  (let [elem (.-currentTarget e)
+        data (get
                (.get events-per-elem (.-currentTarget e))
                (keyword (.-type e)))]
     (emit-event!
       (assoc data                                  ;:dom-event e
+        :event/elem-call-id (.getAttribute elem "data-id")
         :event/value (.-value (.-target e))
-        :event/target-id (.-id (.-target e))
+        :event/target-call-id (.getAttribute (.-target e) "data-id")
         :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
         :event/key-pressed (.-key e)
+        :event/meta-key (.-metaKey e)
         ))))
 
 (defn add-event [elem type data replace?]
@@ -35,11 +38,12 @@
         dom-event-handler))))
 
 (defn change-event-data [elem type path data]
+  (js/console.log "change-event-data" elem type path data)
   (.set events-per-elem elem
         (update
           (.get events-per-elem elem)
           type
-          #(update-in % path data))))
+          #(assoc-in % path data))))
 
 (defn add-events [elem events replace?]
   (doseq [[type data] events]
