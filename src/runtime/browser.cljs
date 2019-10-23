@@ -29,7 +29,8 @@
         (fn [e]
           (js/console.log "diff" (t/read transit-r (.-data e)))
           ;(js/console.profile "render")
-          (mapv process-dom-change! (t/read transit-r (.-data e)))
+          (doseq [x (t/read transit-r (.-data e))]
+            (process-dom-change! x))
           ;(js/console.profileEnd "render")
           )))
 
@@ -42,7 +43,7 @@
     (aset js/window "__worker" worker)
     (init-dom-mutator! worker)))
 
-(defn init []
+(defn ^:export init []
   (println "init")
   (start-worker!)
   )

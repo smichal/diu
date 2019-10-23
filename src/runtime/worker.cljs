@@ -9,8 +9,13 @@
     parts.events
     parts.styles
     parts.docker-layout
+    parts.vaadin-parts
     editor.widgets
-    ))
+    editor.part-editor
+
+    editor.expr-blocks
+    [clojure.zip :as zip]
+    [runtime.expr :as e]))
 
 (println "worker started")
 
@@ -24,7 +29,7 @@
 (def prev-value (atom nil))
 
 (defn emit-changes [v]
-  (let [diffs (ee/get-edits (ec/diff @prev-value v))]
+  (let [diffs (ee/get-edits (ec/diff @prev-value v {:algo :quick}))]
     (reset! prev-value v)
     (post-message diffs)))
 
@@ -35,13 +40,13 @@
     nil
     #_(incr/stabilize!)))
 
-(def c (incr/cell {:a 1 :b 2 :c 1}))
+(def c (incr/cell {:a 1 :b 2 :c false}))
 
 (parts.events/register-effect-handler!
   :test
   (fn [ctx d]
     ;(println "TT" ctx d)
-    (reset! c {:a (rand-int 100) :b 4 :c 1})
+    (reset! c {:a (rand-int 100) :b 4 :c true})
     )
   )
 
@@ -49,7 +54,9 @@
 (def widgets
   {
    :test-app
-   {:events-handler {
+   {:locals {:name "hello world" :test "Button"}
+
+    :events-handler {
                      :button-clicked (fn [e ctx]
                                        ;(println e ctx)
                                        [[:test {:test 1}]])
@@ -63,11 +70,20 @@
                   :text (incr/incr get c :b)}}
            {:dom-events {:click {:event :button-clicked}}
             :dom {:tag :button
-                  :text "button"}}
-           {:button {:theme :primary
-                     :onclick {:event :button-clicked}}}]}}
+                  :text (e/expr '(ctx :scope ))
+                  ;:text "button"
+                  ;:attrs (e/expr '(if true))
+                  }}
+           {:button {:text "Button"
+                     :theme :primary
+                     :onclick {:event :button-clicked}}}
+           {:dom {:tag :div :text ""}}
 
-
+           (editor.expr-blocks/string-input
+             (incr/thunk (-> (editor.expr-blocks/expr-zipper '(* 1 2))
+                             (zip/down)))
+             )
+           ]}}
    })
 
 (def app
@@ -79,13 +95,17 @@
     (w/with-path-annotation
       []
       (merge widgets ; todo with-path-annotation only for app in edit
-             editor.widgets/widgets))))
+             editor.widgets/widgets
+             editor.part-editor/widgets
+             editor.expr-blocks/widgets
+             ))))
 
 (def d
   (incr/incr
     emit-widget
     {::w/parts @w/parts
-     ::w/widgets widgets-cell}
+     ::w/widgets widgets-cell
+     ::w/instance-path []}
     (incr/cell app)))
 
 @d

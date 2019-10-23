@@ -21,6 +21,7 @@
   [org.clojure/core.rrb-vector "0.1.0"]
   ]
 
+ :dev-http {8020 "public/"}
  :builds
  {:app {:target :browser
         :output-dir "public/js"
@@ -29,8 +30,8 @@
         {:shared {}
          :browser {:entries [runtime.browser] :depends-on #{:shared}}
          :worker {:entries [runtime.worker] :depends-on #{:shared} :web-worker true}}
-        :devtools
-        {:http-root "public"
+        ;:devtools
+        #_{:http-root "public"
          :http-port 8020}
         :js-options
         {:resolve {"golden-layout" {:target :global

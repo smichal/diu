@@ -2,13 +2,43 @@
   (:require [runtime.widgets :as w]
             [incr.core :as incr]
             [parts.events :as e]
+            [runtime.expr :refer [expr]]
             ))
+
+(defn search-filter [phrase items]
+  ;(js/console.log "search-filter" phrase items)
+  (->> items
+       (filterv #(clojure.string/includes? (clojure.string/lower-case (:name %))
+                                           (clojure.string/lower-case phrase)))))
+
+(defn search-input-key-event [event ctx]
+  (let [items-num (count (incr/value (get-in ctx [:scope :items])))
+        curr @(get-in ctx [:scope :active-item])]
+    ;; fixme: count after filter
+    (case (:event/key-pressed event)
+      "ArrowUp" [:set-local :active-item (max 0 (dec curr))]
+      "ArrowDown" [:set-local :active-item (min (inc curr) (dec items-num))]
+      #_"Enter" #_[[:dispatch-event (assoc (get-in ctx [:props :on-select])
+                                      :item selected)]
+                   [:set-local :popup false]]
+      nil)))
+
+(defn dialog-open-event [event _]
+  [[:set-local :dialog (:event/value event)]])
+
+(defn parts-for-search [parts]
+  (->> parts
+       (map (fn [[k v]]
+              {:name (or (:part/name v) (str k))
+               :desc (or (:part/desc v) "")}
+              ))))
 
 (def widgets
   {
    :editor-app
    {:set-styles {:height "100vh"}
-    :local-state {:widget-in-edit [:test-app :dom :children 2]}
+    :local-state {:widget-in-edit [:test-app :dom :children 2]
+                  :ctx-of-widget-in-edit nil}
 
     :docker-layout {:layout {:type :row
                              :content [{:type :component
@@ -28,7 +58,7 @@
    :button {:dom-events {:click (w/gctx :params :onclick)}
             :dom {:tag "vaadin-button"
                   :attrs {:theme (w/gctx :params :theme)}
-                  :text "Button"}}
+                  :text (w/gctx :params :text)}}
 
    :text-field {:dom-events {:input (w/gctx :params :oninput)}
                 :dom {:tag "vaadin-text-field"
@@ -49,77 +79,109 @@
                     :children (w/gctx :params)}}
 
    :widget-properties
-   {:v-layout [{:dom {:tag :h5 :text "widget"}}
+   {
+    :local-state {:dialog false}
+    :events-handler
+    {:dialog dialog-open-event}
+    :v-layout [{:dom {:tag :h5 :text "widget"}}
                {:set-styles {:font-size "var(--lumo-font-size-s)"
                              :font-family "Fira Code"}
-                :dom {:tag :p :text (w/with-ctx #(incr/incr str (get-in % [:params :widget-in-edit])))}}
-               {:set-styles {:font-size "var(--lumo-font-size-s)"
-                             :font-family "Fira Code"}
-                :dom {:tag :p :text (w/with-ctx #(incr/incr str (incr/incr get-in (::w/widgets %) (get-in % [:params :widget-in-edit]))))}}
+                :dom {:tag :p
+                      :text (expr '(str (ctx :params :widget-in-edit)))}}
+               #_{:set-styles {:font-size "var(--lumo-font-size-s)"
+                               :font-family "Fira Code"}
+                  :dom {:tag :p :text (expr '(str (get-in (ctx ::w/widgets) (ctx :params :widget-in-edit))))}}
 
-               {:list-of {:items (w/with-ctx #(incr/incr get-in (::w/widgets %) (get-in % [:params :widget-in-edit])))
-                          :item-widget :part-properties-section
+               {:list-of {:items (expr '(get-in (ctx ::w/widgets) (ctx :params :widget-in-edit)))
+                          :item-widget :editor.part-editor/part-properties
                           :param-for-key :part-id
                           :param-for-value :props
                           :common-params {:widget (w/gctx :params :widget-in-edit)}
                           }}
 
-               ]}
+               {:button {:text "Add part"
+                         :onclick {:event :dialog :event/value true}}}
 
-   :part-properties-section
-   {:locals {:part-id (w/gctx :params :part-id)}
-    :events-handler {:field-changed (fn [event ctx]
-                                      (if-let [v (try (cljs.reader/read-string (:event/value event))
-                                                      (catch js/Error e nil))]
-                                        [[:change-widget {:widget (incr/value (get-in ctx [:scope :widget-in-edit]))
-                                                          :part (get-in ctx [:scope :part-id])
-                                                          :field (:field event)
-                                                          :value v}]]))}
-    :v-layout
-    [{:dom {:tag :h5 :text (w/gctx :params :part-id)}}
 
-     {:list-of {:items (w/gctx :params :props)
-                :param-for-key :label
-                :param-for-value :value
-                :item-widget :default-prop-field
-                }}
-     ]}
-
-   :default-prop-field
-   {:text-field {:label (w/gctx :params :label)
-                 :value (w/with-ctx (fn [ctx] (pr-str (get-in ctx [:params :value]))))
-                 :oninput {:event :field-changed
-                           :field (w/gctx :params :label)
-                           }}}
+               {:vaadin-dialog
+                {:opened (w/gctx :scope :dialog)
+                 :children [{:search-dialog {:items
+                                             (expr '(parts-for-search (ctx ::w/parts)))
+                                             #_(w/with-ctx #(incr/incr parts-for-search (get % ::w/parts)))}}]
+                 :opened-changed {:event :dialog}}}
+               ]
+    :order [:local-state :events-handler :v-layout]
+    }
 
 
    :app-in-edit-wrapper
    {:local-state {:edit-mode false}
     :events-handler {:select-widget (fn [event ctx]
                                       (when (:event/meta-key event)
-                                        [:set-local :widget-in-edit (::w/param-path (@w/call-id->ctx (js/parseInt (:event/target-call-id event))))]
+                                        [[:set-local :widget-in-edit (::w/param-path (@w/call-id->ctx (js/parseInt (:event/target-call-id event))))]
+                                         [:set-local :ctx-of-widget-in-edit (@w/call-id->ctx (js/parseInt (:event/target-call-id event)))]
+                                         ]
                                         ))}
     :dom-events {:click {:event :select-widget}}
     :dom {:tag :div
-          :children [{:widget {:widget (w/gctx :params :app-in-edit)}}]}}
+          :children [{:widget {:widget (w/gctx :params :app-in-edit)}}
+
+                     #_{:search-dialog {:items (w/with-ctx #(incr/incr parts-for-search (get % ::w/parts)))}}
+
+                     ]}}
    ;:order [:events-handler :dom-events]
 
+   :dialog
+   {:dom {:tag "vaadin-dialog"
+          :attrs {:opened (w/gctx :params :opened)}
+          :children [{:dom {:tag "template"
+                            :children (w/gctx :params :children)}}]}}
+
+
+   :search-dialog
+   {:set-styles {:width 500}
+    :local-state {:phrase ""
+                  :active-item 0}
+    :locals {:items (w/gctx :params :items)}
+    :events-handler {:change-phrase (fn [event _] [[:set-local :phrase (:event/value event)]
+                                                   [:set-local :active-item 0]])
+                     :set-active (fn [event _] [:set-local :active-item (:item event)])
+                     :keydown search-input-key-event}
+    :v-layout
+    [{:dom-events {:keydown {:event :keydown}}
+      :text-field {:placeholder "Search"
+                   :oninput {:event :change-phrase}
+                   }}
+     {:list-of {:items (w/with-ctx #(incr/incr search-filter
+                                               (get-in % [:scope :phrase])
+                                               (get-in % [:scope :items])))
+                :item-widget :search-item
+                }}
+     ]}
+   :search-item
+   {:set-styles {:background (expr '(if (= (ctx :scope :active-item)
+                                           (ctx :params :key))
+                                      "var(--lumo-contrast-5pct)"))
+                 :border-radius "var(--lumo-border-radius)"
+                 :padding "1px 10px"
+                 :margin "5px 0"}
+    :dom-events {:mouseenter {:event :set-active
+                              :item (expr '(ctx :params :key))}}
+    :dom
+    {:tag :div
+     :children
+     [{:set-styles {:margin-top "0.75rem"}
+       :dom {:tag :h5 :text (w/gctx :params :item :name)}}
+      {:set-styles {:font-size "var(--lumo-font-size-xxs)"
+                    :line-height "var(--lumo-line-height-xs)"
+                    :color "var(--lumo-secondary-text-color)"}
+       :dom {:tag :p :text (w/gctx :params :item :desc)}}]}}
+
    })
-
-
-(e/register-effect-handler!
-  :change-widget
-  (fn [ctx args]
-    (js/console.log "FX" :change-widget args)
-    (swap! runtime.worker/widgets-cell
-           assoc-in
-           (concat (incr/value (:widget args)) [(:part args) (:field args)])
-           (:value args)
-           )))
 
 (e/register-effect-handler!
   :set-local
   (fn [ctx field value]
-    (js/console.log "FX" :set-local field value)
+    ;(js/console.log "FX" :set-local field value)
     (reset! (get-in ctx [:scope field]) value)
     ))

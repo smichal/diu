@@ -87,22 +87,18 @@
                             (if-not part
                               (if (not= idx (dec parts-num))
                                 (throw (js/Error. (str "Part not found: " id)))
-
                                 ;; widget can be called instead of part for last part
-
                                 [(get parts-defs :widget)
                                  {:widget id :params params}])
                               [part params])))
                         part-calls)
-        call-id (next-call-id)
+        [last-part last-part-params] (last part-calls)
+        call-id (hash (::instance-path ctx))
+        ;_ (js/console.log "hash" (::instance-path ctx) (hash (::instance-path ctx)))
         ctx (assoc ctx
               ;::parent-call-id (::call-id ctx) ;; passing call-id from parent causes additional calls to subcomponents
               ::call-id call-id)
         ]
-
-    @(incr/incr (incr/on-destroy (fn []
-                                   ;(js/console.log "DESTROY" call-id)
-                                   (swap! call-id->ctx dissoc call-id))))
 
     (let [ctx (reduce
                 (fn [ctx [part params]]
@@ -113,9 +109,17 @@
                 ctx
                 part-calls)
 
+          _ @(incr/incr (incr/on-destroy (fn []
+                                           ;(js/console.log "DESTROY" call-id)
+                                           (swap! call-id->ctx (fn [m]
+                                                                 (if (= (m call-id) ctx)
+                                                                   (dissoc m call)
+                                                                   m))))))
           _ (swap! call-id->ctx assoc call-id ctx)
 
-          [last-part last-part-params] (last part-calls)
+          _ (when-not (:part/render last-part)
+              (throw (js/Error. (str "Widget without :part/render fn: " w))))
+
           result ((:part/render last-part)
                   ctx
                   (deep-ctx-apply ctx last-part-params)) ;; auto resolve widget?
@@ -130,25 +134,35 @@
                    (reverse part-calls))]
       result)))
 
+(defn get-or-throw [m k msg]
+  (if-let [r (get m k)]
+    r
+    (throw (js/Error. msg))))
+
 (defn resolve-widget [ctx widget-or-id]
+  ;(println "resolve-widget" widget-or-id)
   (if (keyword? widget-or-id)
-    (incr/incr get (::widgets ctx) widget-or-id)
+    (incr/incr get-or-throw (::widgets ctx) widget-or-id (str "Widget not found:" widget-or-id))
     widget-or-id))
 
 (defn spy [msg x]
   (js/console.log msg x)
   x)
 
-(defn call [ctx w]
+(defn call [ctx w key]
   ;(js/console.log "CALL" w)
 
   (try
-    (incr/deep-deref
-      @(incr/incr compose-parts
-                  (-> ctx
-                      (assoc ::param-path (:path (meta w)))
-                      (dissoc ::call-id))
-                  (incr/value w)))
+    (with-meta
+     (incr/deep-deref
+       @(incr/incr compose-parts
+                   (-> ctx
+                       (assoc ::param-path (:path (meta w)))
+                       (update ::instance-path conj key)
+                       (dissoc ::call-id))
+                   (incr/value w)))
+     {:derefed true}
+     )
     (catch js/Error e
       (js/console.error e)
       {:dom/tag :div

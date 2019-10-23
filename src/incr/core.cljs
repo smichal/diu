@@ -116,7 +116,15 @@
     (let [v (get-node-value [x args])]
      (if (instance? js/Error v)
        (throw v)
-       v))))
+       v)))
+  IEquiv
+  (-equiv [o other]
+    (and (= (type o) (type other))
+         (= x (.-x other))
+         (= args (.-args other))))
+  IHash
+  (-hash [this]
+    (hash [x args])))
 
 #_(deftype IncrMap [x args]
   IDeref
@@ -212,8 +220,14 @@
 
 (defn deep-deref [x]
   (specter/transform
-    (specter/walker #(implements? IDeref %))
-    deref
+    (specter/walker #(do
+                       #_(when (:derefed (meta %))
+                         (js/console.log "DEREFED"))
+                       (or
+                         (:derefed (meta %))
+                         (implements? IDeref %))))
+    ;deref
+    value
     x))
 
 (def aaa #js{:prototype map})

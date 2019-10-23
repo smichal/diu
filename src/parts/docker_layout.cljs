@@ -10,6 +10,6 @@
      :docker-layout/root {:layout layout}
      :docker-layout/frames (->> frames
                                 (map (fn [[k w]]
-                                       [k [(incr/incr call ctx w)]]))
+                                       [k [(incr/incr call ctx w k)]]))
                                 (into {}))}
     ))

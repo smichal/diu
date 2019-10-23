@@ -17,7 +17,7 @@
           node node]
      (if a
        (recur rest (get (.-children node) a))
-       (.-ref node))))
+       (some-> node .-ref))))
   ([path]
    (get-node path @dom-refs)))
 
@@ -77,17 +77,18 @@
     (reducer ctx (vec path) op data)))
 
 (defn add-child [{:keys [node-path] :as ctx} elem-id data]
-  (let [elem (js/document.createElement (name (:dom/tag data)))
-        ;path (if (= id :root) path (conj path id))
-        ]
-    (add-node! (conj node-path elem-id) elem)
-    (.append (get-node node-path) elem)
-    (let [ctx (update ctx :node-path conj elem-id)]
-      (doseq [[k v] (->> data
-                         (sort-by (fn [[k v]] (get {:dom/styles -1 :docker-layout/root 2 :docker-layout/frames 3} k 0)))
-                         )]
-        (apply-change ctx [k] :+ v)))
-    ))
+  (when data
+   (let [elem (js/document.createElement (name (:dom/tag data)))
+         before (when (number? elem-id)
+                  (get-node (conj node-path elem-id)))]
+     (add-node! (conj node-path elem-id) elem)
+     (.insertBefore (get-node node-path) elem before)
+     (let [ctx (update ctx :node-path conj elem-id)]
+       (doseq [[k v] (->> data
+                          (sort-by (fn [[k v]] (get {:dom/styles -1 :docker-layout/root 2 :docker-layout/frames 3} k 0)))
+                          )]
+         (apply-change ctx [k] :+ v)))
+     )))
 
 (defn add-children [ctx data]
   (doseq [[id desc] (map-indexed (fn [i x] [i x]) data)]
@@ -95,16 +96,12 @@
 
 (defn remove-child [{:keys [node-path]} elem-id]
   ;(js/console.log "remove-child" node-path elem-id)
-  (let [elem (get-node (conj node-path elem-id))]
-    (.remove elem))
-  (swap! dom-refs remove-ref (conj node-path elem-id)))
+  (when-let [elem (get-node (conj node-path elem-id))]
+    (.remove elem)
+    (swap! dom-refs remove-ref (conj node-path elem-id))))
 
 (defn remove-children [{:keys [node-path]}]
   (swap! dom-refs remove-refs node-path)
-  #_(swap! dom-refs
-         #(specter/setval (concat node-path [specter/MAP-KEYS (comp not #{::ref})])
-                          specter/NONE
-                          %))
   (let [elem (get-node node-path)]
     (while (.-firstChild elem)
       (.remove (.-firstChild elem)))))
@@ -113,19 +110,40 @@
   :dom/children
   (fn [ctx path op data]
     ;(js/console.log ":dom/children" path op data)
-    (match [path op]
-      [[:root] :r] (add-child ctx :root data)
-      [[elem-id] :+] (add-child ctx elem-id data)
-      [[elem-id] :-] (remove-child ctx elem-id)
-      [[elem-id & r] _] (apply-change (update ctx :node-path conj elem-id) r op data)
-      [[] :+] (add-children ctx data)
-      [[] :-] (remove-children ctx))))
+    (match [path op data]
+      [[:root] :r _] (add-child ctx :root data)
+      [[elem-id] :r nil] (remove-child ctx elem-id)
+      [[elem-id] :+ _] (add-child ctx elem-id data)
+      [[elem-id] :r _] (add-child ctx elem-id data)
+      [[elem-id] :- _] (remove-child ctx elem-id)
+      [[elem-id & r] _ _] (apply-change (update ctx :node-path conj elem-id) r op data)
+      [[] :+ _] (add-children ctx data)
+      [[] :- _] (remove-children ctx)
+      [[] :r _] (do (remove-children ctx)
+                  (add-children ctx data)))))
 
 (add-diff-reducer
   :dom/tag
-  (fn [ctx path op data]
+  (fn [{:keys [node-path]} path op data]
     ;; todo?
-    ))
+    #_(match [path op]
+           [[] :r] (let [old-elem (get-node node-path)
+                         new-elem (js/document.createElement (name data))]
+
+                     ; change ref in @dom-refs
+                     (loop [[a & rest] node-path
+                            node @dom-refs]
+                       (if a
+                         (recur rest (get (.-children node) a))
+                         (set! (.-ref node) new-elem)))
+
+                     (.append new-elem (.-children old-elem))
+
+                     (.replaceChild (.-parentElement old-elem)
+                                    new-elem
+                                    old-elem)
+
+                     ))))
 
 (add-diff-reducer
   :dom/text
@@ -133,19 +151,23 @@
     (set! (.-innerText (get-node node-path)) data)))
 
 (defn set-attr [elem attr val]
-  (if val
-    (.setAttribute elem attr val)
-    (.removeAttribute elem attr)
-    ))
+  (let [attr (if (keyword? attr) (name attr) attr)
+        val (if (keyword? val) (name val) val)]
+    (if val
+      (.setAttribute elem attr val)
+      (.removeAttribute elem attr)
+      )))
 
 (add-diff-reducer
   :dom/attrs
   (fn [{:keys [node-path]} path op data]
     (let [elem (get-node node-path)]
+      ;(js/console.log "ATTRs" elem path op data)
       (match [path op]
              [[] :+] (doseq [[k v] data]
-                       (set-attr elem (name k) (and v (name v))))
-             [[k] _] (set-attr elem (name k) (and data (name data)))
+                       (set-attr elem k v))
+             [[] :-] nil  ;fixme
+             [[k] _] (set-attr elem k data)
              ))))
 
 (add-diff-reducer

@@ -17,15 +17,17 @@
         data (get
                (.get events-per-elem (.-currentTarget e))
                (keyword (.-type e)))]
+    ;(js/console.log e)
     (emit-event!
-      (assoc data                                  ;:dom-event e
-        :event/elem-call-id (.getAttribute elem "data-id")
-        :event/value (.-value (.-target e))
-        :event/target-call-id (.getAttribute (.-target e) "data-id")
-        :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
-        :event/key-pressed (.-key e)
-        :event/meta-key (.-metaKey e)
-        ))))
+      (merge
+        {:event/elem-call-id (.getAttribute elem "data-id")
+         :event/value (or (.-value (.-target e))
+                          (some-> (.-detail e) .-value)) ; for vaadin-dialog event
+         :event/target-call-id (.getAttribute (.-target e) "data-id")
+         :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
+         :event/key-pressed (.-key e)
+         :event/meta-key (.-metaKey e)}
+        data))))
 
 (defn add-event [elem type data replace?]
   (let [node-events (.get events-per-elem elem)

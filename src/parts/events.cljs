@@ -7,6 +7,8 @@
 
 (defpart
   :dom-events
+  :part/name "DOM events"
+  :part/desc "Attaches events to the widget"
   :part/augment-result
   (fn [ctx params result]
     (update
@@ -18,6 +20,8 @@
 
 (defpart
   :events-handler
+  :part/name "Event handlers"
+  :part/desc "Sets handlers for events"
   :part/augment-ctx
   (fn [ctx handlers]
     (update ctx ::handlers merge handlers)))
@@ -25,10 +29,14 @@
 (declare execute-effects!)
 
 (defn dispatch! [event]
-  (let [ctx (@w/call-id->ctx (js/parseInt (:event/elem-call-id event)))
+  (let [ctx (@w/call-id->ctx
+              (-> (:event/elem-call-id event)
+                  (clojure.string/split " ")
+                  last
+                  js/parseInt))
         handler (get-in ctx [::handlers (:event event)])]
 
-    (js/console.log "event" event ctx)
+    (js/console.log "event" event #_ctx)
 
     (if handler
       (execute-effects! (handler event ctx) ctx)
@@ -51,6 +59,35 @@
         ; try
         (if-let [h (@effects-handlers fx)]
           (do
-            ;(js/console.log "FX" fx args)
+            (js/console.log "FX" fx args)
             (apply h ctx args))
-          (js/console.warn "no handler for effect" fx args))))))
+          (js/console.warn "no handler for effect" fx args))))
+    (incr/schedule-stabilization!)
+    ))
+
+(register-effect-handler!
+  :emit-event
+  (fn [_ event]
+    (dispatch! event)))
+
+(register-effect-handler!
+  :delay
+  (fn [ctx time effects]
+    (js/console.log :delay time effects)
+    (js/setTimeout
+      (fn []
+        (execute-effects! effects ctx))
+      time)))
+
+(defpart
+  :bind-input
+  :part/name "Bind input"
+  :part/augment-result
+  (fn [ctx params result]
+    (assoc-in result [:dom/events :input]
+              {:event ::bind-input}))
+  :part/augment-ctx
+  (fn [ctx params]
+    (assoc-in ctx [::handlers ::bind-input]
+              (fn [event ctx]
+                [[:set-local (:to params) (:event/value event)]]))))

@@ -18,13 +18,13 @@
                                           :content [(:layout data)]})
                                 elem)
           ]
-      (.registerComponent layout "frame"
-                          (fn [container]
+      (.registerComponent ^js layout "frame"
+                          (fn [^js container]
                             (let [ref (.get (.getElement container) 0)
                                   id (-> container .-_config .-id keyword)]
                               (dom/add-node! (conj node-path id) ref))))
       ;(js/setTimeout #(.init layout) 16)
-      (.init layout)
+      (.init ^js layout)
       )))
 
 (add-diff-reducer
