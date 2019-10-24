@@ -1,11 +1,23 @@
 (ns parts.base
-  (:require [incr.core :as incr])
+  (:require [incr.core :as incr]
+            [parts.params :as parts])
   (:use [runtime.widgets :only [defpart resolve-widget call]]))
 
 (defpart
   :dom
   :part/name "DOM element"
   :part/desc "Creates DOM element with given tag, attributes, and content"
+
+  :part/params-s {:tag ::parts/tag-name
+                  :children ::parts/children
+                  :text ::parts/string
+                  :attrs ::parts/dom-attrs
+                  }
+
+  :part/params-defaults {:tag :div}
+
+  :part/editor [{:param :tag :label "Tag"}]
+
   :part/params
   {:tag
    {:param/name "Tag"

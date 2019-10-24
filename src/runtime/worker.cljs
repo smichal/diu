@@ -54,7 +54,7 @@
 (def widgets
   {
    :test-app
-   {:locals {:name "hello world" :test "Button"}
+   {:locals {:name "hello world" :test "Button" :user {:name "john" :age 1}}
 
     :events-handler {
                      :button-clicked (fn [e ctx]
@@ -79,10 +79,6 @@
                      :onclick {:event :button-clicked}}}
            {:dom {:tag :div :text ""}}
 
-           (editor.expr-blocks/string-input
-             (incr/thunk (-> (editor.expr-blocks/expr-zipper '(* 1 2))
-                             (zip/down)))
-             )
            ]}}
    })
 

@@ -18,6 +18,8 @@
                (.get events-per-elem (.-currentTarget e))
                (keyword (.-type e)))]
     ;(js/console.log e)
+    (when-not (.-metaKey e)     ;fixme
+      (.stopPropagation e))
     (emit-event!
       (merge
         {:event/elem-call-id (.getAttribute elem "data-id")

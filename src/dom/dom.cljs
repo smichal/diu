@@ -125,25 +125,35 @@
 (add-diff-reducer
   :dom/tag
   (fn [{:keys [node-path]} path op data]
+    (when (not= path []) (throw ":dom/tag has to be a string"))
     ;; todo?
-    #_(match [path op]
-           [[] :r] (let [old-elem (get-node node-path)
-                         new-elem (js/document.createElement (name data))]
+    (when (= op :r)
+      (js/console.log ":dom/tag replace" path data)
+     (let [old-elem (get-node node-path)
+           new-elem (js/document.createElement (name data))]
 
-                     ; change ref in @dom-refs
-                     (loop [[a & rest] node-path
-                            node @dom-refs]
-                       (if a
-                         (recur rest (get (.-children node) a))
-                         (set! (.-ref node) new-elem)))
+       ; change ref in @dom-refs
+       (loop [[a & rest] node-path
+              node @dom-refs]
+         (if a
+           (recur rest (get (.-children node) a))
+           (set! (.-ref node) new-elem)))
 
-                     (.append new-elem (.-children old-elem))
+       (.append new-elem (.-children old-elem))
 
-                     (.replaceChild (.-parentElement old-elem)
-                                    new-elem
-                                    old-elem)
+       (.set dom.events/events-per-elem new-elem (.get dom.events/events-per-elem old-elem))
+       (doseq [[type _] (.get dom.events/events-per-elem old-elem)]
+         (.addEventListener
+           new-elem
+           (name type)
+           dom.events/dom-event-handler))
+       (.set dom.styles/styles-per-elem new-elem (.get dom.styles/styles-per-elem old-elem))
 
-                     ))))
+       (.replaceChild (.-parentElement old-elem)
+                      new-elem
+                      old-elem)
+
+       ))))
 
 (add-diff-reducer
   :dom/text

@@ -4,6 +4,7 @@
             [runtime.expr :as e]
             [incr.core :as incr]
             cljs.reader
+            [parts.params :as params]
             ))
 
 (defn expr-zipper [expr]
@@ -20,10 +21,13 @@
     expr))
 
 
-(defn block [& {:keys [label children]}]
+(defn block [& {:keys [label children expr-zip inline]}]
   {:block
    {:label label
-    :children children}})
+    :children children
+    :expr-zip expr-zip
+    :inline inline
+    }})
 
 (defn choice [expr-zip options]
   {:block-choice {:expr-zip expr-zip
@@ -75,13 +79,19 @@
       :else {:dom {:tag :div :text (pr-str expr)}}
       )))
 
+(defn children-zippers [zip]
+  (take-while some? (iterate zip/right (zip/down zip))))
+
+(defn append-child-zipper [zip]
+  (-> zip
+      (zip/append-child nil)
+      (zip/down)
+      (zip/rightmost)))
+
 (defn fn-call [expr-zip ctx]
   (let [[f & args] (zip/node expr-zip)
-        arg-zips (drop 1 (take-while some? (iterate zip/right (zip/down expr-zip))))
-        next-arg (-> expr-zip
-                     (zip/append-child nil)
-                     (zip/down)
-                     (zip/rightmost))]
+        arg-zips (drop 1 (children-zippers expr-zip))
+        next-arg (append-child-zipper expr-zip)]
 
     (block
       :label "fn"
@@ -96,10 +106,7 @@
 (defn getter-block [expr-zip ctx]
   (let [[_ k & path] (zip/node expr-zip)
         ;arg-zips (drop 1 (take-while some? (iterate zip/right (zip/down expr-zip))))
-        next-arg (-> expr-zip
-                     (zip/append-child nil)
-                     (zip/down)
-                     (zip/rightmost))
+        next-arg (append-child-zipper expr-zip)
 
         dict (incr/incr get
                         (get-in ctx [:scope :ctx-of-widget-in-edit])
@@ -108,15 +115,20 @@
         next-keys (when (map? val) (keys val))
         ]
 
-    (js/console.log "GETTER" (get-in ctx [:scope :ctx-of-widget-in-edit]))
-    (js/console.log "GETTER" val next-keys)
-
     (block
       :label "ctx"
       :children
       (concat
-        [{:dom {:tag :div :text (str k)}}
-         {:dom {:tag :div :text (pr-str path)}}]
+        [{:set-styles {:display :inline}
+          :dom {:tag :div :text (str k " " (clojure.string/join " " (butlast path)))}}]
+
+        (when path
+          [(block
+             :expr-zip (-> expr-zip (zip/down) (zip/rightmost))
+             :label ""
+             :children [{:dom {:tag :div :text (last path)}}]
+             :inline true)])
+
         (when next-keys
          [(choice
             next-arg
@@ -128,33 +140,86 @@
 
   )
 
-(defn string-input [expr ctx]
+(defn string-input [expr-zip spec ctx]
+  (js/console.log "string-input" expr-zip )
+  (let [expr (zip/node expr-zip)]
+   (cond
+     (string? expr) (string-block expr-zip ctx)
+     (and (list? expr) (= (first expr) 'ctx)) (getter-block expr-zip ctx)
+     (list? expr) (fn-call expr-zip ctx)
+
+     :else                                                  ; (nil? expr)
+     (choice
+       expr-zip
+       (fn [phrase]
+         (concat
+           [{:text (str "\"" phrase "\"") :value phrase}
+            (if-let [v (try (cljs.reader/read-string phrase)
+                            (catch js/Error _ nil))]
+              {:text (str "edn: " phrase) :value v})]
+           (fns-list ctx)
+           ))
+       ))))
+
+(defn child-block [expr-zip spec ctx]
+  (let [[widget params] (first (zip/node expr-zip))]
+    (block
+      :label "widget"
+      :expr-zip expr-zip
+      :children [
+                 {:dom {:tag :div :text (pr-str widget)}}
+                 ]
+      )))
+
+(defn children-block [expr-zip spec ctx]
+  (let [expr (zip/node expr-zip)
+        [expr expr-zip] (if (nil? expr)
+                          [[] (expr-zipper [])]
+                          [expr expr-zip])
+        zippers (children-zippers expr-zip)
+        new-child-zip (append-child-zipper expr-zip)
+        ]
+    (block
+      :label "[]"
+      :children (concat
+                  (map #(child-block % ::params/child ctx) zippers)
+                  [(choice
+                     new-child-zip
+                     (fn [phrase]
+                       (map
+                         (fn [[k v]]
+                           {:text k :value {k {}}})
+                         @(:runtime.widgets/widgets ctx))))]))))
+
+
+(def type->block (atom {}))
+
+(defn register-block! [spec f]
+  (swap! type->block assoc spec f))
+
+(register-block! ::params/tag-name string-input)
+(register-block! ::params/string string-input)
+(register-block! ::params/children children-block)
+(register-block! ::params/child child-block)
+
+
+(defn block-or-input2 [expr-zip spec ctx]
+  (when-let [block (get @type->block spec)]
+    (block expr-zip spec ctx)))
+
+(defn expr-input [expr spec ctx]
+  (js/console.log "expr-input" expr spec)
   (let [expr (if (instance? e/Expr expr)
                (.-expr expr)
                expr)
         expr-zip (expr-zipper expr)]
-    (cond
-      (string? expr) (string-block expr-zip ctx)
-      (and (list? expr) (= (first expr) 'ctx)) (getter-block expr-zip ctx)
-      (list? expr) (fn-call expr-zip ctx)
+    (block-or-input2 expr-zip spec ctx)))
 
-      :else                                                 ; (nil? expr)
-      (choice
-        expr-zip
-        (fn [phrase]
-          (concat
-            [{:text (str "\"" phrase "\"") :value phrase}
-             (if-let [v (try (cljs.reader/read-string phrase)
-                             (catch js/Error _ nil))]
-               {:text (str "edn: " phrase) :value v})]
-            (fns-list ctx)
-            ))
-        ))))
 
 (extend-protocol IStack
   LazySeq
   (-peek [coll]
-    (js/console.log "Peed" coll)
+    (js/console.log "-peek" coll)
     (first coll))
   (-pop [coll] (rest coll)))
 
@@ -168,16 +233,22 @@
                    :event/elem-call-id (:event/elem-call-id event) ;fixme
                    }]]))
 
-; todo
-#_(defn remove-handler [event ctx]
-  (let [zipper (incr/value (get-in ctx [:scope :expr-zip]))]
-    [[:emit-event {:event :expr-changed
-                   :value (-> zipper
-                              (zip/replace (:value event))
-                              (zip/root)
-                              e/expr)
-                   :event/elem-call-id (:event/elem-call-id event) ;fixme
-                   }]])
+
+(defn on-block-keypress [event ctx]
+  (case (:event/key-pressed event)
+    "Backspace" [[:emit-event {:event :expr-changed
+                               :value (let [[_ path :as zipper] (incr/value (get-in ctx [:scope :expr-zip]))]
+                                        (js/console.log "Backspace" zipper)
+
+                                        (if (nil? path)
+                                          nil
+                                          (-> zipper
+                                              (zip/remove)
+                                              (zip/root)
+                                              e/expr)))
+                               :event/elem-call-id (:event/elem-call-id event) ;fixme
+                               }]]
+    nil)
   )
 
 (def widgets
@@ -187,10 +258,15 @@
                  :border "1px solid var(--lumo-primary-color)"
                  :border-radius "var(--lumo-border-radius)"
                  :padding "2px 0"
-                 :display :flex
+                 :display (e/expr '(if (ctx :params :inline) :inline-flex :flex))
                  ;:align-items :center
+                 ":focus" {:background "red"}
                  }
+    :locals {:expr-zip (e/expr '(or (ctx :params :expr-zip) (ctx :scope :expr-zip)))}
+    :events-handler {:keydown on-block-keypress}
+    :dom-events {:keydown {:event :keydown}}
     :dom {:tag :div
+          :attrs {:tabindex 0}
           :children
           [{:set-styles {:font-size "var(--lumo-font-size-xxs)"
                          :padding "2px 5px"

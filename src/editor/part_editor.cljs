@@ -62,11 +62,16 @@
 
 
            (w/with-ctx
-             #(editor.expr-blocks/string-input
+             #(editor.expr-blocks/expr-input
                 (-> %
                     (get-in [:scope :widget])
                     incr/value
                     (get-in [(get-in % [:scope :part-id]) (get-in % [:scope :param-id])])
+                    )
+                (-> %
+                    (get-in [:scope :part])
+                    incr/value
+                    (get-in [:part/params-s (get-in % [:scope :param-id])])
                     )
                 #_(get-in (ctx :scope :widget) [(ctx :scope :part-id) (ctx :params :param-id)])
                 %))
@@ -79,9 +84,12 @@
 (e/register-effect-handler!
   :change-widget
   (fn [ctx args]
-    ;(js/console.log "FX" :change-widget args)
-    (swap! runtime.worker/widgets-cell
-           assoc-in
-           (concat (incr/value (:widget args)) [(:part args) (:field args)])
-           (:value args)
-           )))
+    (let [path (vec (concat (incr/value (:widget args)) [(:part args) (:field args)]))]
+      (js/console.log "FX" :change-widget args path)
+      (swap! runtime.worker/widgets-cell
+             assoc-in
+             path
+             (w/with-path-annotation
+               path
+               (:value args))
+             ))))

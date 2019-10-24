@@ -116,6 +116,7 @@
                                                                    (dissoc m call)
                                                                    m))))))
           _ (swap! call-id->ctx assoc call-id ctx)
+          ;_ (js/console.log call-id "=>" ctx)
 
           _ (when-not (:part/render last-part)
               (throw (js/Error. (str "Widget without :part/render fn: " w))))
@@ -150,25 +151,25 @@
   x)
 
 (defn call [ctx w key]
-  ;(js/console.log "CALL" w)
-
-  (try
-    (with-meta
-     (incr/deep-deref
-       @(incr/incr compose-parts
-                   (-> ctx
-                       (assoc ::param-path (:path (meta w)))
-                       (update ::instance-path conj key)
-                       (dissoc ::call-id))
-                   (incr/value w)))
-     {:derefed true}
-     )
-    (catch js/Error e
-      (js/console.error e)
-      {:dom/tag :div
-       :dom/text (pr-str e)}
-      )
-    ))
+  ;(js/console.log "CALL" w (:path (meta w)))
+  (when w
+   (try
+     (with-meta
+       (incr/deep-deref
+         @(incr/incr compose-parts
+                     (-> ctx
+                         (assoc ::param-path (:path (meta w)))
+                         (update ::instance-path conj key)
+                         (dissoc ::call-id))
+                     (incr/value w)))
+       {:derefed true}
+       )
+     (catch js/Error e
+       (js/console.error e)
+       {:dom/tag :div
+        :dom/text (pr-str e)}
+       )
+     )))
 
 ;; :part/render (ctx: const), (params: (possible?) thunk)
 ;; children (id -> Thunk(x)) ?
