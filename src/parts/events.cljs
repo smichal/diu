@@ -16,7 +16,9 @@
       (->> params
            (specter/setval
              [specter/MAP-VALS nil?]
-             specter/NONE)))))
+             specter/NONE)
+           incr/deep-deref
+           ))))
 
 (defpart
   :events-handler

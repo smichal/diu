@@ -139,7 +139,8 @@
            (recur rest (get (.-children node) a))
            (set! (.-ref node) new-elem)))
 
-       (.append new-elem (.-children old-elem))
+       (doseq [c (js/Array.prototype.splice (.-children old-elem))]
+         (.append new-elem c))
 
        (.set dom.events/events-per-elem new-elem (.get dom.events/events-per-elem old-elem))
        (doseq [[type _] (.get dom.events/events-per-elem old-elem)]
@@ -148,6 +149,10 @@
            (name type)
            dom.events/dom-event-handler))
        (.set dom.styles/styles-per-elem new-elem (.get dom.styles/styles-per-elem old-elem))
+
+       (doseq [x (range (.-length (.-attributes old-elem)))]
+         (let [attr (.item (.-attributes old-elem) x)]
+           (.setAttribute new-elem (.-name attr) (.-value attr))))
 
        (.replaceChild (.-parentElement old-elem)
                       new-elem

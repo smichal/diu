@@ -1,16 +1,18 @@
 (ns runtime.expr
-  (:require [runtime.widgets :as w]
-            [incr.core :as incr]
-            [cljs.spec.alpha :as s]
-            [com.rpl.specter :as specter]))
+  (:require                                                 ;[runtime.widgets :as w]
+    [incr.core :as incr]
+    [cljs.spec.alpha :as s]
+    [com.rpl.specter :as specter]
+    ;[clojure.core.match :refer [match]]
+    ))
 
 
-(deftype CtxGetter [path]
+#_(deftype CtxGetter [path]
   w/IWithCtx
   (-with-ctx [this ctx]
     (get-in ctx path)))
 
-(defn ctx-get [& path]
+#_(defn ctx-get [& path]
   (CtxGetter. path))
 
 
@@ -26,8 +28,13 @@
    'str str
    'pr-str pr-str
    'get-in get-in
+   'get get
    'map map
    'mapcat mapcat
+
+   'butlast butlast
+
+   'hash hash
 
    'parts-for-search parts-for-search
    })
@@ -39,38 +46,42 @@
 
            (env expr) (env expr)
 
-           (and (list? expr)
-                (= 'if (first expr)))
-           (let [[_ c t e] expr]
-             (if (eval-expr ctx c)
-               (eval-expr ctx t)
-               (eval-expr ctx e)))
-
-           (and (list? expr)
-                (= 'or (first expr)))
-           (let [[_ & args] expr]
-             (first (keep #(eval-expr ctx %) args)))
-
-           (and (list? expr)
-                (= 'and (first expr)))
-           (let [[_ & args] expr]
-             (every? #(eval-expr ctx %) args))
-
-
-           (and (list? expr) (= 'ctx (first expr)))
-           (let [[_ & path] expr]
-             (when (or (< 1 (count path))
-                       (not (#{:params :scope} (first path)))) ;; todo remove
-               (reduce
-                 (fn [o k] (incr/value (get o k)))
-                 ctx
-                 (map (partial eval-expr ctx) path))))
-
            (list? expr)
-           (let [[f & args] expr]
-             (apply (eval-expr ctx f)
-                    (->> args
-                         (map (partial eval-expr ctx)))))
+           (case (first expr)
+             if (let [[_ c t e] expr]
+                   (if (eval-expr ctx c)
+                     (eval-expr ctx t)
+                     (eval-expr ctx e)))
+             or (let [[_ & args] expr]
+                   (first (keep #(eval-expr ctx %) args)))
+             and (let [[_ & args] expr]
+                    (every? #(eval-expr ctx %) args))
+
+             params (let [[_ & path] expr]
+                      (reduce
+                        (fn [o k] (incr/value (get o k)))
+                        (:params ctx)
+                        (map (partial eval-expr ctx) path)))
+
+             scope (let [[_ & path] expr]
+                      (reduce
+                        (fn [o k] (incr/value (get o k)))
+                        (:scope ctx)
+                        (map (partial eval-expr ctx) path)))
+
+             ctx (let [[_ & path] expr]
+                    (when (or (< 1 (count path))
+                              (not (#{:params :scope} (first path)))) ;; todo remove
+                      (reduce
+                        (fn [o k] (incr/value (get o k)))
+                        ctx
+                        (map (partial eval-expr ctx) path))))
+
+             ;; fn call
+             (let [[f & args] expr]
+               (apply (eval-expr ctx f)
+                      (->> args
+                           (map (partial eval-expr ctx))))))
 
            (vector? expr)
            (mapv (partial eval-expr ctx) expr)
@@ -97,7 +108,7 @@
                (s/valid? spec res))
        res))))
 
-(deftype Expr [expr spec]
+#_(deftype Expr [expr spec]
   w/IWithCtx
   (-with-ctx [this ctx]
     ;(js/console.log "EVAL" expr ctx)
@@ -112,7 +123,8 @@
 
 
 (defn expr [e]
-  (specter/transform
+  e
+  #_(specter/transform
     (specter/codewalker list?)
     #(Expr. % nil)
     e))
@@ -121,47 +133,3 @@
   ([e] (Expr. e nil))
   ([e spec] (Expr. e spec)))
 
-
-
-(defn block-args-for-fn [f expr])
-
-{:label "fn"
- :type :call
- :args (fn [ctx expr phrase]
-         (let [[f & args] expr]
-           (if-not f
-             [{:options [{:label "if"
-                          :value 'if}]}
-              ]
-             (concat
-               [{:value f}]
-               (block-args-for-fn f expr)
-               )
-             )))
- :emit-expr (fn [args] ; expr -> expr
-              (apply list args))
- ;:parse-expr (fn []) ; expr -> choices
- }
-
-
-
-{:label "widget"
- :type :widget-call
- :args {:widget {:widget (fn [])
-                 :params (fn [])}}
- }
-
-{:label "{}"
- :type :styles
- :args {:margin nil
-        ::add (fn [])}
- }
-
-{:label "{}"
- :type :event
- :args {:event (fn [])}}
-
-{:label "[]"
- :type :children
- :args []
- }

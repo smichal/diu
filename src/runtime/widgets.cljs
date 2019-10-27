@@ -4,7 +4,8 @@
             clojure.test.check.properties
             clojure.test.check
             [incr.core :as incr]
-            [com.rpl.specter :as specter]))
+            [com.rpl.specter :as specter]
+            [runtime.expr :as expr]))
 
 (s/def ::part
   (s/keys
@@ -41,10 +42,16 @@
 
 (defn with-ctx [f] (WithCtx. f))
 
-(defn deep-ctx-apply [ctx x]
+(defn deep-eval-params [ctx x]
   (specter/transform
-    (specter/codewalker #(implements? IWithCtx %))
-    #(-with-ctx % ctx)
+    (specter/codewalker #(or (list? %)
+                             (implements? IWithCtx %)
+                             (:zip/branch? (meta %))        ;fixme
+                             ))
+    #(cond
+       (list? %) (incr/incr expr/eval-expr ctx %)
+       (implements? IWithCtx %) (-with-ctx % ctx)
+       :else %)
     x))
 
 (def parts (atom {}))
@@ -104,7 +111,7 @@
                 (fn [ctx [part params]]
                   (if-let [f (:part/augment-ctx part)]
                     (f ctx
-                       (deep-ctx-apply ctx params))
+                       (deep-eval-params ctx params))
                     ctx))
                 ctx
                 part-calls)
@@ -123,12 +130,12 @@
 
           result ((:part/render last-part)
                   ctx
-                  (deep-ctx-apply ctx last-part-params)) ;; auto resolve widget?
+                  (deep-eval-params ctx last-part-params)) ;; auto resolve widget?
           result (reduce
                    (fn [result [part params]]
                      (if-let [f (:part/augment-result part)]
                        (f ctx
-                          (deep-ctx-apply ctx params)
+                          (deep-eval-params ctx params)
                           result)
                        result))
                    result
@@ -143,7 +150,7 @@
 (defn resolve-widget [ctx widget-or-id]
   ;(println "resolve-widget" widget-or-id)
   (if (keyword? widget-or-id)
-    (incr/incr get-or-throw (::widgets ctx) widget-or-id (str "Widget not found:" widget-or-id))
+    (incr/incr get-or-throw (::widgets ctx) widget-or-id (str "Widget not found " widget-or-id))
     widget-or-id))
 
 (defn spy [msg x]
@@ -178,7 +185,7 @@
 (deftype CtxGetter [path]
  IWithCtx
   (-with-ctx [this ctx]
-    (get-in ctx (deep-ctx-apply ctx path)))
+    (get-in ctx (deep-eval-params ctx path)))
   ;Object
   ;(toString [this] (pr-str path))
   IEquiv
@@ -209,3 +216,10 @@
       assoc
       :path prefix)
     m))
+
+(defn infer-params-of-widget [w]
+  (map
+    second
+    (specter/select
+      (specter/walker #(and (list? %) (= 'params (first %))))
+      w)))

@@ -2,7 +2,6 @@
   (:require [runtime.widgets :as w]
             [incr.core :as incr]
             [parts.events :as e]
-            [runtime.expr :refer [expr]]
             ))
 
 (defn search-filter [phrase items]
@@ -40,6 +39,23 @@
     :local-state {:widget-in-edit [:test-app :dom :children 2]
                   :ctx-of-widget-in-edit nil}
 
+    :events-handler {:select-widget (fn [event ctx]
+                                      (if (::w/instance-path event)
+                                        (let [call-id (hash (::w/instance-path event))
+                                              widget-ctx (@w/call-id->ctx call-id)]
+                                          [[:set-local :widget-in-edit (::w/param-path widget-ctx)]
+                                           [:set-local :ctx-of-widget-in-edit widget-ctx]])
+
+                                        (when (:event/meta-key event)
+                                          (let [call-id (-> (:event/target-call-id event)
+                                                            (clojure.string/split " ")
+                                                            first ;last
+                                                            js/parseInt)
+                                                widget-ctx (@w/call-id->ctx call-id)]
+                                            [[:set-local :widget-in-edit (::w/param-path widget-ctx)]
+                                             [:set-local :ctx-of-widget-in-edit widget-ctx]
+                                             ]))))}
+
     :docker-layout {:layout {:type :row
                              :content [{:type :component
                                         :id :editor-pane
@@ -55,10 +71,10 @@
                              {:widget-properties
                               {:widget-in-edit (w/gctx :scope :widget-in-edit)}}}}}
 
-   :button {:dom-events {:click (w/gctx :params :onclick)}
+   :button {:dom-events {:click '(params :onclick)}
             :dom {:tag "vaadin-button"
-                  :attrs {:theme (w/gctx :params :theme)}
-                  :text (w/gctx :params :text)}}
+                  :attrs {:theme '(params :theme)}
+                  :text '(params :text)}}
 
    :text-field {:dom-events {:input (w/gctx :params :oninput)}
                 :dom {:tag "vaadin-text-field"
@@ -79,20 +95,31 @@
                     :children (w/gctx :params)}}
 
    :widget-properties
-   {
+   {:set-styles {:height "100%"
+                 :overflow :scroll}
     :local-state {:dialog false}
-    :events-handler
-    {:dialog dialog-open-event}
+    :events-handler {:dialog dialog-open-event}
     :v-layout [{:dom {:tag :h5 :text "widget"}}
                {:set-styles {:font-size "var(--lumo-font-size-s)"
                              :font-family "Fira Code"}
                 :dom {:tag :p
-                      :text (expr '(str (ctx :params :widget-in-edit)))}}
+                      :text '(str (ctx :params :widget-in-edit)
+                                  "  "
+                                  (get (scope :ctx-of-widget-in-edit) ::w/instance-path)
+                                  " " (hash (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
+                                  )}}
+
+               {;:if
+                :button {:text "to parent"
+                         :onclick {:event :select-widget
+                                   ::w/instance-path '(butlast (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
+                                   }}}
+
                #_{:set-styles {:font-size "var(--lumo-font-size-s)"
                                :font-family "Fira Code"}
                   :dom {:tag :p :text (expr '(str (get-in (ctx ::w/widgets) (ctx :params :widget-in-edit))))}}
 
-               {:list-of {:items (expr '(get-in (ctx ::w/widgets) (ctx :params :widget-in-edit)))
+               {:list-of {:items '(get-in (ctx ::w/widgets) (ctx :params :widget-in-edit))
                           :item-widget :editor.part-editor/part-properties
                           :param-for-key :part-id
                           :param-for-value :props
@@ -106,22 +133,16 @@
                {:vaadin-dialog
                 {:opened (w/gctx :scope :dialog)
                  :children [{:search-dialog {:items
-                                             (expr '(parts-for-search (ctx ::w/parts)))
+                                             '(parts-for-search (ctx ::w/parts))
                                              #_(w/with-ctx #(incr/incr parts-for-search (get % ::w/parts)))}}]
                  :opened-changed {:event :dialog}}}
                ]
-    :order [:local-state :events-handler :v-layout]
+    :order [:local-state :events-handler :set-styles :v-layout]
     }
 
 
    :app-in-edit-wrapper
    {:local-state {:edit-mode false}
-    :events-handler {:select-widget (fn [event ctx]
-                                      (when (:event/meta-key event)
-                                        [[:set-local :widget-in-edit (::w/param-path (@w/call-id->ctx (js/parseInt (:event/target-call-id event))))]
-                                         [:set-local :ctx-of-widget-in-edit (@w/call-id->ctx (js/parseInt (:event/target-call-id event)))]
-                                         ]
-                                        ))}
     :dom-events {:click {:event :select-widget}}
     :dom {:tag :div
           :children [{:widget {:widget (w/gctx :params :app-in-edit)}}
@@ -159,14 +180,14 @@
                 }}
      ]}
    :search-item
-   {:set-styles {:background (expr '(if (= (ctx :scope :active-item)
-                                           (ctx :params :key))
-                                      "var(--lumo-contrast-5pct)"))
+   {:set-styles {:background '(if (= (ctx :scope :active-item)
+                                     (ctx :params :key))
+                                "var(--lumo-contrast-5pct)")
                  :border-radius "var(--lumo-border-radius)"
                  :padding "1px 10px"
                  :margin "5px 0"}
     :dom-events {:mouseenter {:event :set-active
-                              :item (expr '(ctx :params :key))}}
+                              :item '(ctx :params :key)}}
     :dom
     {:tag :div
      :children
