@@ -30,6 +30,7 @@
    'get-in get-in
    'get get
    'map map
+   'map? map?
    'mapcat mapcat
 
    'butlast butlast
@@ -44,7 +45,7 @@
    (let [res
          (cond
 
-           (env expr) (env expr)
+           (and (env expr) (symbol? expr)) (env expr)
 
            (list? expr)
            (case (first expr)

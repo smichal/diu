@@ -72,23 +72,23 @@
   (swap! diff-reducers assoc key f))
 
 (defn apply-change [ctx [r & path] op data]
+  ;(js/console.log " apply-change" r path op data)
   (let [reducer (get @diff-reducers r)]
     (when-not reducer (throw (str "No dom reducer for: " r)))
     (reducer ctx (vec path) op data)))
 
 (defn add-child [{:keys [node-path] :as ctx} elem-id data]
-  (when data
-   (let [elem (js/document.createElement (name (:dom/tag data)))
-         before (when (number? elem-id)
-                  (get-node (conj node-path elem-id)))]
-     (add-node! (conj node-path elem-id) elem)
-     (.insertBefore (get-node node-path) elem before)
-     (let [ctx (update ctx :node-path conj elem-id)]
-       (doseq [[k v] (->> data
-                          (sort-by (fn [[k v]] (get {:dom/styles -1 :docker-layout/root 2 :docker-layout/frames 3} k 0)))
-                          )]
-         (apply-change ctx [k] :+ v)))
-     )))
+  (let [tag (some-> data :dom/tag name)                     ;(or "span")                    ;; fixme: <span> for nil insert
+        elem (js/document.createElement tag)
+        before (when (number? elem-id)
+                 (get-node (conj node-path elem-id)))]
+    (add-node! (conj node-path elem-id) elem)
+    (.insertBefore (get-node node-path) elem before)
+    (let [ctx (update ctx :node-path conj elem-id)]
+      (doseq [[k v] (->> data
+                         (sort-by (fn [[k v]] (get {:dom/styles -1 :docker-layout/root 2 :docker-layout/frames 3} k 0)))
+                         )]
+        (apply-change ctx [k] :+ v)))))
 
 (defn add-children [ctx data]
   (doseq [[id desc] (map-indexed (fn [i x] [i x]) data)]
@@ -109,7 +109,7 @@
 (add-diff-reducer
   :dom/children
   (fn [ctx path op data]
-    ;(js/console.log ":dom/children" path op data)
+    ;(js/console.log ":dom/children" path op data (:node-path ctx) (get-node (:node-path ctx)))
     (match [path op data]
       [[:root] :r _] (add-child ctx :root data)
       [[elem-id] :r nil] (remove-child ctx elem-id)
@@ -128,7 +128,7 @@
     (when (not= path []) (throw ":dom/tag has to be a string"))
     ;; todo?
     (when (= op :r)
-      (js/console.log ":dom/tag replace" path data)
+      #_(js/console.log ":dom/tag replace" path data)
      (let [old-elem (get-node node-path)
            new-elem (js/document.createElement (name data))]
 
@@ -188,4 +188,5 @@
 (add-diff-reducer
   :dom/call-id
   (fn [{:keys [node-path]} path op data]
+    ;(js/console.log "call-id-attr " node-path path op data)
     (set-attr (get-node node-path) "data-id" data)))

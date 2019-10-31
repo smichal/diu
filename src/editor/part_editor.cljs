@@ -29,19 +29,44 @@
                                                        :field (get-in ctx [:scope :param-id])
                                                        :value (or (:value event) (:event/value event))}]])
                      }
+    :set-styles {:margin "16px 0"}
     :v-layout
-    [{:set-styles {:padding "5px 12px"
-                   :border-top "1px solid var(--lumo-contrast-10pct)"}
+    {:children
+     [{:set-styles {:border-top "1px solid var(--lumo-contrast-10pct)"
+                    :padding "16px 12px"}
+       :h-layout
+       {:children
+        [{:set-styles {:margin 0
+                       :color "var(--lumo-body-text-color)"
+                       :font-weight 500}
+          :dom {:tag :h4 :text (expr '(or (ctx :scope :part :part/name) (ctx :scope :part-id)))}}
+         {:set-styles {:color "var(--lumo-body-text-color)"
+                       :margin 0}
+          :dom {:tag :h4 :text "+"}}
+         ]}}
 
-      :dom {:tag :h5 :text (expr '(or (ctx :scope :part :part/name) (ctx :scope :part-id)))}}
+      #_{:set-styles {:padding "0 12px"}
+         :list-of {:items (expr '(ctx :scope :part :part/editor))
+                   :param-for-value :item
+                   :item-widget :param-editor
+                   }}
 
-     {:set-styles {:padding "0 12px"}
-      :list-of {:items (expr '(ctx :scope :part :part/params))
-                :param-for-key :param-id
-                :param-for-value :desc
-                :item-widget :param-editor
-                }}
-     ]}
+      {:set-styles {:padding "0 12px"}
+       :dom
+       {:children
+        [(w/with-ctx
+           #(editor.expr-blocks/expr-input
+              (-> %
+                  (get-in [:scope :widget])
+                  incr/value
+                  (get-in [(get-in % [:scope :part-id])]))
+              (-> %
+                  (get-in [:scope :part])
+                  incr/value
+                  (get-in [:part/params]))
+              %))]}}
+
+      ]}}
 
    ;:default-prop-field
    #_{:text-field {:label (w/gctx :params :label)
@@ -50,33 +75,70 @@
                              :field (w/gctx :params :label)
                              }}}
 
+   ::field
+   {:set-styles {:flex-wrap :wrap
+                 :margin "var(--lumo-space-s) 0"}
+    :h-layout
+    {:children
+     [{:set-styles {:color "var(--lumo-secondary-text-color)"
+                    :font-weight 500
+                    :font-size "var(--lumo-font-size-s)"
+                    :align-self :center
+                    :margin-bottom 3
+                    :min-width 60
+                    }
+       :dom {:tag :div
+             :text '(params :label)}}
+      '(params :field)
+      ]}
+    }
+
+   :expr-input
+   {:set-styles {:flex-grow 1}
+    :dom {:children [(w/with-ctx
+                       #(editor.expr-blocks/expr-input
+                          (-> %
+                              (get-in [:scope :widget])
+                              incr/value
+                              (get-in [(get-in % [:scope :part-id]) (get-in % [:scope :param-id])]))
+                          (-> %
+                              (get-in [:scope :part])
+                              incr/value
+                              (get-in [:part/params (get-in % [:scope :param-id])]))
+                          %))]}}
+
    :param-editor
-   {:locals {:param-id (w/gctx :params :param-id)}
-    :dom {:children
-          [{:text-field {:label (w/gctx :params :desc :param/name)
-                         :value (expr '(pr-str (get-in (ctx :scope :widget) [(ctx :scope :part-id) (ctx :params :param-id)])))
-                         #_(w/with-ctx (fn [ctx] (pr-str (get-in ctx [:params :value]))))
-                         :oninput {:event :field-changed
-                                   :field (w/gctx :params :param-id)
-                                   }}}
+   {:locals {:param-id (w/gctx :params :item :param)}
+    ::field
+    {:label (w/gctx :params :item :label)
+     :field {:expr-input {}}}
+
+    ;:dom
+    #_{:children
+       [{:text-field {:label (w/gctx :params :desc :param/name)
+                      :value (expr '(pr-str (get-in (ctx :scope :widget) [(ctx :scope :part-id) (ctx :params :param-id)])))
+                      #_(w/with-ctx (fn [ctx] (pr-str (get-in ctx [:params :value]))))
+                      :oninput {:event :field-changed
+                                :field (w/gctx :params :param-id)
+                                }}}
 
 
-           (w/with-ctx
-             #(editor.expr-blocks/expr-input
-                (-> %
-                    (get-in [:scope :widget])
-                    incr/value
-                    (get-in [(get-in % [:scope :part-id]) (get-in % [:scope :param-id])])
-                    )
-                (-> %
-                    (get-in [:scope :part])
-                    incr/value
-                    (get-in [:part/params-s (get-in % [:scope :param-id])])
-                    )
-                #_(get-in (ctx :scope :widget) [(ctx :scope :part-id) (ctx :params :param-id)])
-                %))
+        (w/with-ctx
+          #(editor.expr-blocks/expr-input
+             (-> %
+                 (get-in [:scope :widget])
+                 incr/value
+                 (get-in [(get-in % [:scope :part-id]) (get-in % [:scope :param-id])])
+                 )
+             (-> %
+                 (get-in [:scope :part])
+                 incr/value
+                 (get-in [:part/params-s (get-in % [:scope :param-id])])
+                 )
+             #_(get-in (ctx :scope :widget) [(ctx :scope :part-id) (ctx :params :param-id)])
+             %))
 
-           ]}}
+        ]}}
 
    })
 
@@ -84,8 +146,8 @@
 (e/register-effect-handler!
   :change-widget
   (fn [ctx args]
-    (let [path (vec (concat (incr/value (:widget args)) [(:part args) (:field args)]))]
-      (js/console.log "FX" :change-widget args path)
+    (let [path (vec (concat (incr/value (:widget args)) [(:part args) #_(:field args)]))]
+      ;(js/console.log "FX" :change-widget args path)
       (swap! runtime.worker/widgets-cell
              assoc-in
              path

@@ -86,57 +86,60 @@
    :v-layout {:set-styles {:display :flex
                            :flex-direction :column}
               :dom {:tag :div
-                    :children (w/gctx :params)}}
+                    :children '(params :children)}
+              :meta {:part/params {:children {:param/type :parts.params/children}}}
+              }
 
    :h-layout {:set-styles {:display :flex
                            :flex-direction :row
                            :justify-content :space-between}
               :dom {:tag :div
-                    :children (w/gctx :params)}}
+                    :children '(params :children)}}
 
    :widget-properties
    {:set-styles {:height "100%"
                  :overflow :scroll}
     :local-state {:dialog false}
     :events-handler {:dialog dialog-open-event}
-    :v-layout [{:dom {:tag :h5 :text "widget"}}
-               {:set-styles {:font-size "var(--lumo-font-size-s)"
-                             :font-family "Fira Code"}
-                :dom {:tag :p
-                      :text '(str (ctx :params :widget-in-edit)
-                                  "  "
-                                  (get (scope :ctx-of-widget-in-edit) ::w/instance-path)
-                                  " " (hash (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
-                                  )}}
+    :v-layout
+    {:children [{:dom {:tag :h5 :text "widget"}}
+                {:set-styles {:font-size "var(--lumo-font-size-s)"
+                              :font-family "Fira Code"}
+                 :dom {:tag :p
+                       :text '(str (ctx :params :widget-in-edit)
+                                   "  "
+                                   (get (scope :ctx-of-widget-in-edit) ::w/instance-path)
+                                   " " (hash (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
+                                   )}}
 
-               {;:if
-                :button {:text "to parent"
-                         :onclick {:event :select-widget
-                                   ::w/instance-path '(butlast (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
-                                   }}}
+                {;:if
+                 :button {:text "to parent"
+                          :onclick {:event :select-widget
+                                    ::w/instance-path '(butlast (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
+                                    }}}
 
-               #_{:set-styles {:font-size "var(--lumo-font-size-s)"
-                               :font-family "Fira Code"}
-                  :dom {:tag :p :text (expr '(str (get-in (ctx ::w/widgets) (ctx :params :widget-in-edit))))}}
+                #_{:set-styles {:font-size "var(--lumo-font-size-s)"
+                                :font-family "Fira Code"}
+                   :dom {:tag :p :text (expr '(str (get-in (ctx ::w/widgets) (ctx :params :widget-in-edit))))}}
 
-               {:list-of {:items '(get-in (ctx ::w/widgets) (ctx :params :widget-in-edit))
-                          :item-widget :editor.part-editor/part-properties
-                          :param-for-key :part-id
-                          :param-for-value :props
-                          :common-params {:widget (w/gctx :params :widget-in-edit)}
-                          }}
+                {:list-of {:items '(get-in (ctx ::w/widgets) (ctx :params :widget-in-edit))
+                           :item-widget :editor.part-editor/part-properties
+                           :param-for-key :part-id
+                           :param-for-value :props
+                           :common-params {:widget (w/gctx :params :widget-in-edit)}
+                           }}
 
-               {:button {:text "Add part"
-                         :onclick {:event :dialog :event/value true}}}
+                {:button {:text "Add part"
+                          :onclick {:event :dialog :event/value true}}}
 
 
-               {:vaadin-dialog
-                {:opened (w/gctx :scope :dialog)
-                 :children [{:search-dialog {:items
-                                             '(parts-for-search (ctx ::w/parts))
-                                             #_(w/with-ctx #(incr/incr parts-for-search (get % ::w/parts)))}}]
-                 :opened-changed {:event :dialog}}}
-               ]
+                {:vaadin-dialog
+                 {:opened (w/gctx :scope :dialog)
+                  :children [{:search-dialog {:items
+                                              '(parts-for-search (ctx ::w/parts))
+                                              #_(w/with-ctx #(incr/incr parts-for-search (get % ::w/parts)))}}]
+                  :opened-changed {:event :dialog}}}
+                ]}
     :order [:local-state :events-handler :set-styles :v-layout]
     }
 
@@ -169,16 +172,17 @@
                      :set-active (fn [event _] [:set-local :active-item (:item event)])
                      :keydown search-input-key-event}
     :v-layout
-    [{:dom-events {:keydown {:event :keydown}}
-      :text-field {:placeholder "Search"
-                   :oninput {:event :change-phrase}
-                   }}
-     {:list-of {:items (w/with-ctx #(incr/incr search-filter
-                                               (get-in % [:scope :phrase])
-                                               (get-in % [:scope :items])))
-                :item-widget :search-item
-                }}
-     ]}
+    {:children
+     [{:dom-events {:keydown {:event :keydown}}
+       :text-field {:placeholder "Search"
+                    :oninput {:event :change-phrase}
+                    }}
+      {:list-of {:items (w/with-ctx #(incr/incr search-filter
+                                                (get-in % [:scope :phrase])
+                                                (get-in % [:scope :items])))
+                 :item-widget :search-item
+                 }}
+      ]}}
    :search-item
    {:set-styles {:background '(if (= (ctx :scope :active-item)
                                      (ctx :params :key))
@@ -203,6 +207,5 @@
 (e/register-effect-handler!
   :set-local
   (fn [ctx field value]
-    ;(js/console.log "FX" :set-local field value)
-    (reset! (get-in ctx [:scope field]) value)
-    ))
+    ;(js/console.log "FX" :set-local field value ctx)
+    (reset! (get-in ctx [:scope field]) value)))

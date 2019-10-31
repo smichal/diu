@@ -70,14 +70,15 @@
                   :text (incr/incr get c :b)}}
            {:dom-events {:click {:event :button-clicked}}
             :dom {:tag :button
-                  :text (e/expr '(ctx :scope ))
+                  :text '(scope :user)
                   ;:text "button"
                   ;:attrs (e/expr '(if true))
                   }}
-           {:button {:text "Button"
-                     :theme :primary
-                     :onclick {:event :button-clicked}}}
-           {:dom {:tag :div :text ""}}
+           {:widget {:widget :v-layout
+                     :params {:children [{:widget {:widget :button
+                                                   :params {:text "Button"
+                                                            :theme :primary
+                                                            :onclick {:event :button-clicked}}}}]}}}
 
            ]}}
    })

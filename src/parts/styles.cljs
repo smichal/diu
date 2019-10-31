@@ -13,7 +13,7 @@
     (update result
             :dom/styles
             merge
-            params)))
+            (incr/value params))))
 
 
 (def properties

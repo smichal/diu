@@ -5,32 +5,25 @@
 
 (defpart
   :dom
-  :part/name "DOM element"
+  :part/name "HTML Element"
   :part/desc "Creates DOM element with given tag, attributes, and content"
 
-  :part/params-s {:tag ::parts/tag-name
-                  :children ::parts/children
-                  :text ::parts/string
-                  :attrs ::parts/dom-attrs
-                  }
-
-  :part/params-defaults {:tag :div}
-
-  :part/editor [{:param :tag :label "Tag"}]
-
   :part/params
-  {:tag
-   {:param/name "Tag"
-    :param/default :div}
-   :children
-   {:param/name "Children"
-    :param/default []
-    :param/type {}}
-   :text {:param/name "Text"}
-   :attrs {:param/name "Attributes"}
+  {:tag {:param/name "Tag"
+         :param/default :div
+         :param/type ::parts/tag-name}
+   :attrs {:param/name "Attributes"
+           :param/type ::parts/dom-attrs}
+   :text {:param/name "Text"
+          :param/type ::parts/string}
+   :children {:param/name "Children"
+              :param/default []
+              :param/type ::parts/children}
    }
+
   :part/render
   (fn [ctx params]
+    ;(js/console.log params) ;todo check deep-deref here
     (cond->
       {:dom/tag (or (:tag params) :div)
        :dom/call-id (:runtime.widgets/call-id ctx) ;; only for editor
@@ -48,6 +41,10 @@
   :widget
   :part/name "Call widget"
   :part/desc "Calls other widget with given params"
+  :part/params ::parts/widget-call #_{:widget {:param/type ::parts/widget
+                         :param/name "Widget"}
+                :params {:param/type ::parts/params
+                         :param/name "Params"}}
   :part/render
   (fn [ctx {:keys [widget params]}]
     ;; todo: incr?
@@ -61,7 +58,6 @@
       )))
 
 (defn add-local-state [ctx params]
-  ;(js/console.log "add-local-state" params ctx)
   (update ctx :scope merge (map
                              (fn [[k v]]
                                [k (if (implements? IDeref v) v (incr/cell v))])
@@ -71,6 +67,7 @@
   :local-state
   :part/name "Local state"
   :part/desc "Adds local state to widget"
+  :part/params ::parts/locals
   :part/augment-ctx
   (fn [ctx params]
     @(incr/incr add-local-state ctx params)))
@@ -79,6 +76,7 @@
   :locals
   :part/name "Locals"
   :part/desc "Sets constant values in widget's scope"
+  :part/params ::parts/locals
   :part/augment-ctx
   (fn [ctx params]
     (update ctx :scope merge params)))
@@ -118,7 +116,12 @@
 (defn if-widget [ctx cond then else]
   (if (incr/value cond)
     (call ctx then :t)
-    (when else (call ctx else :e))))
+    (if else
+      (call ctx else :e)
+      {:dom/tag :span
+       :dom/call-id (:runtime.widgets/call-id ctx)
+       }
+      )))
 
 (defpart
   :if

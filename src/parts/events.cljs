@@ -7,7 +7,7 @@
 
 (defpart
   :dom-events
-  :part/name "DOM events"
+  :part/name "Trigger events"
   :part/desc "Attaches events to the widget"
   :part/augment-result
   (fn [ctx params result]

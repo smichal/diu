@@ -29,8 +29,8 @@
                                                   :result ::result)
                                      :ret ::result))
 
-(s/def :part/params (s/map-of keyword? :part/param))
-(s/def :part/param (s/keys))
+;(s/def :part/params (s/map-of keyword? :part/param))
+;(s/def :part/param (s/keys))
 
 (defprotocol IWithCtx
   (-with-ctx [this ctx]))
@@ -72,7 +72,7 @@
 
 (defn map-in-order [m]
   (let [order (:order m)
-        not-ordered (clojure.set/difference (set (keys m)) (set order) #{:order})]
+        not-ordered (clojure.set/difference (set (keys m)) (set order) #{:order :meta})]
     (concat
       (map (fn [k] [k (m k)]) order)
       (map (fn [k] [k (m k)]) not-ordered))))

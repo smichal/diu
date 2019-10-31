@@ -11,3 +11,8 @@
 
 (s/def ::child (constantly true))
 (s/def ::children (s/coll-of ::child))
+
+(s/def ::widget keyword?)
+(s/def ::params (s/map-of #(or string? keyword?) (constantly true))) ;;fixme
+
+(s/def ::locals (s/map-of keyword? (constantly true)))
