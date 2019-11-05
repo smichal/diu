@@ -4,6 +4,7 @@
     ["@vaadin/vaadin-text-field"]
     ["@vaadin/vaadin-dialog"]
     ["@vaadin/vaadin-lumo-styles"]
+    ["@vaadin/vaadin-checkbox"]
     [clojure.core.match :refer [match]]
     [dom.dom :as dom :refer [add-diff-reducer]]))
 

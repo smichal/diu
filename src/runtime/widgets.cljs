@@ -9,7 +9,7 @@
 
 (s/def ::part
   (s/keys
-    :req [(or :part/render :part/augment-ctx :part/augment-result)]
+    ;:req [(or :part/render :part/augment-ctx :part/augment-result)]
 
     ))
 
@@ -42,7 +42,9 @@
 
 (defn with-ctx [f] (WithCtx. f))
 
+;; fixme: dont go to children in nested widgets
 (defn deep-eval-params [ctx x]
+  ;(js/console.log "deep-eval-params" (pr-str x))
   (specter/transform
     (specter/codewalker #(or (list? %)
                              (implements? IWithCtx %)
@@ -122,8 +124,10 @@
                                                                  (if (= (m call-id) ctx)
                                                                    (dissoc m call)
                                                                    m))))))
+          #_(when-not (@call-id->ctx call-id)
+              (js/console.log call-id (::instance-path ctx) "=>" #_ctx))
+
           _ (swap! call-id->ctx assoc call-id ctx)
-          ;_ (js/console.log call-id "=>" ctx)
 
           _ (when-not (:part/render last-part)
               (throw (js/Error. (str "Widget without :part/render fn: " w))))
@@ -158,7 +162,7 @@
   x)
 
 (defn call [ctx w key]
-  ;(js/console.log "CALL" w (:path (meta w)))
+  ;(js/console.log "CALL" w (:path (meta w)) (::instance-path ctx) key)
   (when w
    (try
      (with-meta

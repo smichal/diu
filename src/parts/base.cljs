@@ -15,6 +15,7 @@
    :attrs {:param/name "Attributes"
            :param/type ::parts/dom-attrs}
    :text {:param/name "Text"
+          :param/default "Text..."
           :param/type ::parts/string}
    :children {:param/name "Children"
               :param/default []
@@ -129,3 +130,11 @@
   :part/desc "Conditional choice between widgets"
   :part/render (fn [ctx {:keys [cond then else]}]
                  (incr/incr if-widget ctx cond then else)))
+
+(defpart
+  :meta
+  :part/name "Metadata"
+  :part/params {:part/params {:param/name "Params"
+                              :param/type ::parts/params}
+
+   })

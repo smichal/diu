@@ -85,6 +85,7 @@
                     :font-size "var(--lumo-font-size-s)"
                     :align-self :center
                     :margin-bottom 3
+                    :margin-right 6
                     :min-width 60
                     }
        :dom {:tag :div

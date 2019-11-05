@@ -43,8 +43,10 @@
                                       (if (::w/instance-path event)
                                         (let [call-id (hash (::w/instance-path event))
                                               widget-ctx (@w/call-id->ctx call-id)]
-                                          [[:set-local :widget-in-edit (::w/param-path widget-ctx)]
-                                           [:set-local :ctx-of-widget-in-edit widget-ctx]])
+                                          (if widget-ctx
+                                            [[:set-local :widget-in-edit (::w/param-path widget-ctx)]
+                                             [:set-local :ctx-of-widget-in-edit widget-ctx]]
+                                            (js/console.warn "widget not found" call-id (::w/instance-path event))))
 
                                         (when (:event/meta-key event)
                                           (let [call-id (-> (:event/target-call-id event)
@@ -54,16 +56,40 @@
                                                 widget-ctx (@w/call-id->ctx call-id)]
                                             [[:set-local :widget-in-edit (::w/param-path widget-ctx)]
                                              [:set-local :ctx-of-widget-in-edit widget-ctx]
-                                             ]))))}
+                                             ]))))
+                     :undo (fn [e ctx]
+                             (js/console.log "UNDO" (count @runtime.worker/history-atom))
+                             (when-let [w (last (butlast @runtime.worker/history-atom))]
+                               (reset! runtime.worker/history-atom
+                                       (vec (butlast @runtime.worker/history-atom)))
+                               (reset! runtime.worker/widgets-cell w)))
+                     }
+    :v-layout
+    {:children
+     [{:set-styles {:background "var(--lumo-contrast-5pct)"}
+       :h-layout
+       {:children
+        [{:button {:icon "lumo:undo"
+                   :theme "contrast tertiary"
+                   :onclick {:event :undo}}}
+         ]}}
+      {:set-styles {:flex 1}
+       :editor-tabs {:app-in-edit (w/gctx :params :app-in-edit)}}]}
 
-    :docker-layout {:layout {:type :row
+    }
+
+   :editor-tabs
+   {:docker-layout {:layout {:type :row
                              :content [{:type :component
                                         :id :editor-pane
-                                        :width 80
-                                        :componentName "frame"}
+                                        :width 75
+                                        :componentName "frame"
+                                        :title "app"
+                                        }
                                        {:type :component
                                         :id :properties-pane
-                                        :componentName "frame"}]}
+                                        :componentName "frame"
+                                        :title "properties"}]}
                     :frames {:editor-pane
                              {:app-in-edit-wrapper
                               {:app-in-edit (w/gctx :params :app-in-edit)}}
@@ -74,7 +100,14 @@
    :button {:dom-events {:click '(params :onclick)}
             :dom {:tag "vaadin-button"
                   :attrs {:theme '(params :theme)}
-                  :text '(params :text)}}
+                  :text '(params :text)
+                  :children '(if (params :icon)
+                               [{:dom {:tag "iron-icon"
+                                       :attrs {:icon (params :icon)}}}])}}
+
+   :checkbox {:dom-events {:click '(params :onclick)}
+              :dom {:tag "vaadin-checkbox"
+                    :attrs {:checked '(params :checked)}}}
 
    :text-field {:dom-events {:input (w/gctx :params :oninput)}
                 :dom {:tag "vaadin-text-field"
@@ -87,14 +120,18 @@
                            :flex-direction :column}
               :dom {:tag :div
                     :children '(params :children)}
-              :meta {:part/params {:children {:param/type :parts.params/children}}}
+              :meta {:part/name "Vertical layout"
+                     :part/params {:children {:param/type :parts.params/children}}}
               }
 
    :h-layout {:set-styles {:display :flex
                            :flex-direction :row
                            :justify-content :space-between}
               :dom {:tag :div
-                    :children '(params :children)}}
+                    :children '(params :children)}
+              :meta {:part/name "Horizontal layout"
+                     :part/params {:children {:param/type :parts.params/children}}}
+              }
 
    :widget-properties
    {:set-styles {:height "100%"
@@ -102,20 +139,31 @@
     :local-state {:dialog false}
     :events-handler {:dialog dialog-open-event}
     :v-layout
-    {:children [{:dom {:tag :h5 :text "widget"}}
-                {:set-styles {:font-size "var(--lumo-font-size-s)"
-                              :font-family "Fira Code"}
+    {:children [{:set-styles {:margin "16px 12px 0"}
+                 :dom {:tag :h5 :text "widget"}}
+                {:set-styles {:font-size "var(--lumo-font-size-m)"
+                              :font-family "Fira Code"
+                              :margin "0 12px"}
                  :dom {:tag :p
                        :text '(str (ctx :params :widget-in-edit)
-                                   "  "
-                                   (get (scope :ctx-of-widget-in-edit) ::w/instance-path)
-                                   " " (hash (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
+                                   ;"  "
+                                   ;(get (scope :ctx-of-widget-in-edit) ::w/instance-path)
+                                   ;" " (hash (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
                                    )}}
+                {:set-styles {:margin "0 12px"
+                              :font-family "Fira Code"
+                              :font-size "var(--lumo-font-size-s)"
+                              :color "var(--lumo-secondary-text-color)"
+                              }
+                 :dom {:tag :p
+                       :text '(pr-str (get (scope :ctx-of-widget-in-edit) :params))
+                       }}
 
                 {;:if
+                 :set-styles {:margin "0 12px"}
                  :button {:text "to parent"
                           :onclick {:event :select-widget
-                                    ::w/instance-path '(butlast (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
+                                    ::w/instance-path '(butlast-without-nil (get (scope :ctx-of-widget-in-edit) ::w/instance-path))
                                     }}}
 
                 #_{:set-styles {:font-size "var(--lumo-font-size-s)"
@@ -129,7 +177,8 @@
                            :common-params {:widget (w/gctx :params :widget-in-edit)}
                            }}
 
-                {:button {:text "Add part"
+                {:set-styles {:margin "0 12px"}
+                 :button {:text "Add part"
                           :onclick {:event :dialog :event/value true}}}
 
 

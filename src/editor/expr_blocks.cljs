@@ -104,11 +104,13 @@
         dict (incr/incr get
                         (get-in ctx [:scope :ctx-of-widget-in-edit])
                         k)
-        val @(incr/incr get-in dict path)
+        val (incr/value @(incr/incr get-in dict path))
         next-keys (when (map? val) (keys val))
+
+        path (map name path)
         ]
 
-    ;(js/console.log "getter-block" k val path next-keys (incr/value (get-in ctx [:scope :ctx-of-widget-in-edit])))
+    ;(js/console.log "getter-block" k @dict val path next-keys (incr/value (get-in ctx [:scope :ctx-of-widget-in-edit])))
 
     (block
       :label (name k)
@@ -128,7 +130,7 @@
                                       :font-size "var(--lumo-font-size-m)"
                                       :font-weight 500
                                       :line-height "30px"}
-                         :dom {:tag :div :text (str "->" (last path))}}]
+                         :dom {:tag :div :text (str (when (butlast path) "->") (last path))}}]
              :inline true)])
 
         (when next-keys
@@ -143,7 +145,10 @@
 
 (def fn-blocks
   {'scope getter-block
-   'params getter-block})
+   'params getter-block
+   'handler getter-block
+   'event getter-block
+   })
 
 (defn fn-call [expr-zip spec ctx]
   (let [f (first (zip/node expr-zip))]
@@ -165,6 +170,7 @@
   (let [expr (zip/node expr-zip)]
    (cond
      (string? expr) (string-block expr-zip ctx)
+     (number? expr) (string-block expr-zip ctx)
      (keyword? expr) (string-block expr-zip ctx)
      (and (list? expr) (= (first expr) 'ctx)) (getter-block expr-zip spec ctx)
      (list? expr) (fn-call expr-zip spec ctx)
@@ -182,6 +188,16 @@
            (fns-list ctx)
            ))
        ))))
+
+(defn boolean-input [expr-zip spec ctx]
+  (block :label "bool"
+         :expr-zip expr-zip
+         :children
+         [{:dom-events {:change {:event :input-changed}}
+           :dom {:tag "vaadin-checkbox"
+                 :attrs {:checked (zip/node expr-zip)}
+                 }}]
+         ))
 
 (declare map-block params-block)
 
@@ -228,12 +244,12 @@
                    [{:set-styles {:font-size "var(--lumo-font-size-l)"
                                   :font-weight 500
                                   :align-self :center}
-                     :dom {:tag :div :text (pr-str widget)}}
+                     :dom {:tag :div :text (or (some-> widget-def :meta :part/name) (pr-str widget))}}
                     {:set-styles {:margin "-1px 0"}
                      :button {:text "edit"
                               :theme :tertiary
                               :onclick {:event :select-widget
-                                        ::w/instance-path (conj (-> ctx :scope :ctx-of-widget-in-edit incr/value ::w/instance-path) (count (zip/lefts expr-zip)))}}}]}}
+                                        ::w/instance-path (seq (conj (-> ctx :scope :ctx-of-widget-in-edit incr/value ::w/instance-path) (count (zip/lefts expr-zip))))}}}]}}
                  (params-block params-zip params-spec ctx :with-other-params true)
                  ]
       )))
@@ -417,6 +433,7 @@
                 (string? value) string-input
                 (number? value) string-input
                 (keyword? value) string-input
+                (boolean? value) boolean-input
                 (vector? value) array-block
                 (list? value) fn-call
                 :else string-input   ;nil

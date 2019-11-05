@@ -33,9 +33,12 @@
     (reset! prev-value v)
     (post-message diffs)))
 
+(declare history)
+
 (defn emit-widget [ctx w]
   (let [r (incr/incr w/call ctx w)]
     ;(js/console.log "WWW" @r)
+    @history
     (emit-changes @r)
     nil
     #_(incr/stabilize!)))
@@ -54,33 +57,109 @@
 (def widgets
   {
    :test-app
-   {:locals {:name "hello world" :test "Button" :user {:name "john" :age 1}}
-
+   {
+    ;:locals {:name "hello world" :test "Button" :user {:name "john" :age 1}}
+    :local-state {:todos [{:text "item 1" :done false}
+                          {:text "item 2" :done true}]}
     :events-handler {
-                     :button-clicked (fn [e ctx]
-                                       ;(println e ctx)
-                                       [[:test {:test 1}]])
-                     }
-    :dom {:tag :div
-          :children
-          [{:set-styles {:color (incr/thunk (if (= 1 @(incr/incr get c :c)) "red" "green"))}
-            :dom {:tag :p
-                  :text (incr/incr get c :a)}}
-           {:dom {:tag :p
-                  :text (incr/incr get c :b)}}
-           {:dom-events {:click {:event :button-clicked}}
-            :dom {:tag :button
-                  :text '(scope :user)
-                  ;:text "button"
-                  ;:attrs (e/expr '(if true))
-                  }}
-           {:widget {:widget :v-layout
-                     :params {:children [{:widget {:widget :button
-                                                   :params {:text "Button"
-                                                            :theme :primary
-                                                            :onclick {:event :button-clicked}}}}]}}}
+                     #_:button-clicked #_(fn [e ctx]
+                                           ;(println e ctx)
+                                           ;                                       [[:test {:test 1}]]
+                                           )
 
-           ]}}
+                     :toggle-done '(handler toggle-done)
+                     :add-new-item '(handler add-new-item)
+                     }
+
+
+    :set-styles {:width 600
+                 :margin "50px auto"
+                 ;:background "var(--lumo-contrast-5pct)"
+                 :padding 20
+                 :border "1px solid var(--lumo-contrast-10pct)"
+                 :border-radius 8
+                 }
+    :widget
+    {:widget :v-layout
+     :params
+     {:children
+      [{:set-styles {:font-weight 500
+                     :font-size 24}
+        :dom {:text "todos"}}
+
+       {:list-of {:items '(scope :todos)
+                  :item-widget :todo-item}}
+
+       {:widget {:widget :new-item-form
+                 :params {}}}
+
+       {:widget {:widget :todos-left-label
+                 :params {}}}
+
+       ]}}}
+
+   :new-item-form
+   {:local-state {:text ""}
+    :widget
+    {:widget :h-layout
+     :params
+     {:children
+      [{:set-styles {:flex 1}
+        :bind-input {:to :text}
+        :widget {:widget :text-field
+                 :params {:placeholder "new todo..."}}}
+       {:widget {:widget :button
+                 :params {:text "add"
+                          :theme :primary
+                          :onclick {:event :add-new-item
+                                    :text '(scope :text)}}}}
+       ]}}}
+
+   :todos-left-label
+   {:set-styles {:font-size 16
+                 :color '(if (< 3 (scope :left)) "red" "#888")}
+    :locals {:left '(pipe
+                      (scope :todos)
+                      (remove :done)
+                      (count))}
+    :dom {:text '(str (scope :left) " items left")}}
+
+   :todo-item
+   {:set-styles {:justify-content :start}
+    :locals {:item '(params :item)}
+    :widget {:widget :h-layout
+             :params {:children
+                      [{:widget {:widget :checkbox
+                                 :params {:onclick {:event :toggle-done
+                                                    :item '(scope :item)}
+                                          :checked '(scope :item :done)}}}
+                       {:set-styles {}
+                        :dom {:text '(scope :item :text)}}]}
+             }}
+
+
+   ;:dom
+   #_{:tag :div
+      :children
+      [{:set-styles {:color (incr/thunk (if (= 1 @(incr/incr get c :c)) "red" "green"))}
+        :dom {:tag :p
+              :text (incr/incr get c :a)}}
+       {:dom {:tag :p
+              :text (incr/incr get c :b)}}
+       {:dom-events {:click {:event :button-clicked}}
+        :dom {:tag :button
+              :text '(scope :user)
+              ;:text "button"
+              ;:attrs (e/expr '(if true))
+              }}
+       {:widget {:widget :v-layout
+                 :params {:children [{:widget {:widget :button
+                                               :params {:text "Button"
+                                                        :theme :primary
+                                                        :onclick {:event :button-clicked}}}}]}}}
+
+       ]}
+
    })
 
 (def app
@@ -96,6 +175,16 @@
              editor.part-editor/widgets
              editor.expr-blocks/widgets
              ))))
+
+(def history-atom (atom []))
+
+(def history
+  (incr/thunk
+    (swap! history-atom
+           (fn [h x]
+             (vec (take-last 100 (conj h x))))
+           @widgets-cell)
+    @history-atom))
 
 (def d
   (incr/incr

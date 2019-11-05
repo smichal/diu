@@ -4,6 +4,7 @@
     [cljs.spec.alpha :as s]
     [com.rpl.specter :as specter]
     ;[clojure.core.match :refer [match]]
+    editor.example
     ))
 
 
@@ -23,8 +24,19 @@
                :desc (or (:part/desc v) "")}
               ))))
 
+(def handlers
+  {'toggle-done editor.example/toggle-done
+   'add-new-item editor.example/add-new-item})
+
+(defn butlast-without-nil [x]
+  (let [r (butlast x)]
+    (if (nil? (last r))
+      (butlast r)
+      r)))
+
 (def env
   {'= =
+   '< <
    'str str
    'pr-str pr-str
    'get-in get-in
@@ -34,10 +46,16 @@
    'mapcat mapcat
 
    'butlast butlast
+   'count count
+   'filter filter
+   'remove remove
 
    'hash hash
+   'butlast-without-nil butlast-without-nil
 
    'parts-for-search parts-for-search
+
+   'handler handlers
    })
 
 (defn eval-expr
@@ -78,8 +96,23 @@
                         ctx
                         (map (partial eval-expr ctx) path))))
 
+             pipe (let [[_ x & fns] expr]
+                    (reduce
+                      (fn [x f]
+                        (if (list? f)
+                          (let [[f & args] f]
+                            (apply
+                              (eval-expr ctx f)
+                              (concat
+                                (map (partial eval-expr ctx) args)
+                                [x])))
+                          ((eval-expr ctx f) x)))
+                      (eval-expr ctx x)
+                      fns))
+
              ;; fn call
              (let [[f & args] expr]
+               ;(js/console.log "f args" expr)
                (apply (eval-expr ctx f)
                       (->> args
                            (map (partial eval-expr ctx))))))

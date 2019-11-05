@@ -36,9 +36,9 @@
                   (clojure.string/split " ")
                   last
                   js/parseInt))
-        handler (get-in ctx [::handlers (:event event)])]
+        handler (incr/value (get-in ctx [::handlers (:event event)]))]
 
-    (js/console.log "event" event #_ctx)
+    (js/console.log "event" event ctx)
 
     (if handler
       (execute-effects! (handler event ctx) ctx)
