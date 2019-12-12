@@ -21,7 +21,8 @@
   (->> parts
        (map (fn [[k v]]
               {:name (or (:part/name v) (str k))
-               :desc (or (:part/desc v) "")}
+               :desc (or (:part/desc v) "")
+               :part-id k}
               ))))
 
 (def handlers
@@ -57,6 +58,10 @@
 
    'handler handlers
    })
+
+;; todo: not always validate?
+(defn valid? [spec val]
+  (s/valid? spec val))
 
 (defn eval-expr
   ([ctx expr]

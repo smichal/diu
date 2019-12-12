@@ -2,19 +2,6 @@
   (:use [runtime.widgets :only [defpart]])
   (:require [incr.core :as incr]))
 
-(defpart
-  :set-styles
-  :part/name "Set styles"
-  :part/desc "Sets styles of element"
-  :part/params-s {}
-
-  :part/augment-result
-  (fn [ctx params result]
-    (update result
-            :dom/styles
-            merge
-            (incr/value params))))
-
 
 (def properties
   (clojure.string/split
@@ -277,3 +264,20 @@ word-spacing
 word-wrap
 z-index"
     "\n"))
+
+
+(defpart
+  :set-styles
+  :part/name "Set styles"
+  :part/desc "Sets styles of element"
+
+  :part/params [:map-of
+                (vec (concat [:enum] properties))
+                string?]
+
+  :part/augment-result
+  (fn [ctx params result]
+    (update result
+            :dom/styles
+            merge
+            (incr/value params))))

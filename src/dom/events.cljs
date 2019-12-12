@@ -12,6 +12,11 @@
   (.postMessage (aget js/window "__worker")
                 (t/write transit-w e)))
 
+(def events-fns
+  {:not-in-input (fn [event data]
+                   (when-not (= "INPUT" (.-tagName (.-target event)))
+                     data))})
+
 (defn dom-event-handler [e]
   (let [elem (.-currentTarget e)
         data (get
@@ -20,16 +25,34 @@
     ;(js/console.log e)
     (when-not (.-metaKey e)     ;fixme
       (.stopPropagation e))
-    (emit-event!
-      (merge
-        {:event/elem-call-id (.getAttribute elem "data-id")
-         :event/value (or (.-value (.-target e))
-                          (some-> (.-detail e) .-value)) ; for vaadin-dialog event
-         :event/target-call-id (.getAttribute (.-target e) "data-id")
-         :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
-         :event/key-pressed (.-key e)
-         :event/meta-key (.-metaKey e)}
-        data))))
+
+    (when (:event-subscription/stop-propagation data)
+      ;;(js/console.log ".stopPropagation")
+      (.stopPropagation e))
+
+
+    (let [emit-fn (fn [e data]
+                    (when (:event data)
+                      (emit-event!
+                        (merge
+                          {:event/elem-call-id (.getAttribute elem "data-id")
+                           :event/value (or (.-value (.-target e))
+                                            (some-> (.-detail e) .-value))   ; for vaadin-dialog event
+                           :event/target-call-id (.getAttribute (.-target e) "data-id")
+                           :event/bounding-rect (.toJSON (.getBoundingClientRect (.-target e)))
+                           :event/key-pressed (.-key e)
+                           :event/meta-key (.-metaKey e)}
+                          data))))
+
+          fns (or (:event-subscription/fns data) [])
+          fns (mapv #(or (events-fns %) %) fns)
+          fns (conj fns emit-fn)]
+      (reduce
+        (fn [data f]
+          (when data
+            (f e data)))
+        data
+        fns))))
 
 (defn add-event [elem type data replace?]
   (let [node-events (.get events-per-elem elem)
@@ -41,13 +64,15 @@
         (name type)
         dom-event-handler))))
 
-(defn change-event-data [elem type path data]
-  (js/console.log "change-event-data" elem type path data)
+(defn change-event-data [elem type path data op]
+  (js/console.log "change-event-data" elem type path data op)
   (.set events-per-elem elem
         (update
           (.get events-per-elem elem)
           type
-          #(assoc-in % path data))))
+          (if (#{:+ :r} op)
+            #(assoc-in % path data)
+            #(update-in % (butlast path) dissoc (last path))))))
 
 (defn add-events [elem events replace?]
   (doseq [[type data] events]
@@ -75,7 +100,7 @@
             [[type] :+] (add-event elem type data false)
             [[type] :r] (add-event elem type data true)
             [[type] :-] (remove-event elem type)
-            [[type & r] _] (change-event-data elem type r data)
+            [[type & r] op] (change-event-data elem type r data op)
             [[] :+] (add-events elem data false)
             [[] :r] (add-events elem data true)
             [[] :-] (remove-events elem)))))

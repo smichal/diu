@@ -2,61 +2,36 @@
 {:source-paths
  ["src"]
 
- :dependencies
- [[org.clojure/clojurescript "1.10.520"]
-  [org.clojure/core.async  "0.4.500"]
-
-  ;[io.replikativ/hasch "0.3.5"]
-
-  ;[cider/cider-nrepl "0.18.0"]
-  [binaryage/devtools "0.9.10"]
-  [com.rpl/specter "1.1.3"]
-  ;[datascript "0.16.7"]
-  ;[mount "0.1.14"]
-  ;[binaryage/oops "0.6.3"]
-  [com.cognitect/transit-cljs "0.8.256"]
-  [org.clojure/test.check "0.10.0"]
-  [juji/editscript "0.4.2"]
-  [org.clojure/core.match "0.3.0"]
-  [org.clojure/core.rrb-vector "0.1.0"]
-  [metosin/spec-tools "0.10.0"]
-
-  ]
+ :deps true
 
  :dev-http {8020 "public/"}
  :builds
- {:app {:target :browser
-        :output-dir "public/js"
-        :asset-path "/js"
-        :modules
-        {:shared {}
-         :browser {:entries [runtime.browser] :depends-on #{:shared}}
-         :worker {:entries [runtime.worker] :depends-on #{:shared} :web-worker true}}
-        ;:devtools
-        #_{:http-root "public"
-         :http-port 8020}
-        :js-options
-        {:resolve {"golden-layout" {:target :global
-                                    :global "GoldenLayout"}}}
-        }
-  :app1 {:target :browser
-        :output-dir "public/js"
-        :asset-path "/js"
-        :modules
-         ;; <- becomes public/js/main.js
-        {:main {:entries [core.idom]}
-         :worker {:depends-on #{:main} :web-worker true}}
-        :devtools
-        {:http-root "public"
-         :http-port 8021}
-        }
+ {:app
+  {:target :browser
+   :output-dir "public/js"
+   :asset-path "/js"
+   :modules
+   {:shared {}
+    :browser {:entries [runtime.browser]
+              :depends-on #{:shared}
+              ;:preloads [shadow.remote.runtime.cljs.browser]
+              }
+    :worker {:entries [runtime.worker]
+             :depends-on #{:shared}
+             :web-worker true}}
+   :devtools {:browser-inject :browser
+              :worker-inject :worker}
+   :js-options
+   {:resolve {"golden-layout" {:target :global
+                               :global "GoldenLayout"}}}
+   }
   :tests
-   {:target :browser-test
-    :test-dir "out/demo-test-dummy"
-    :ns-regexp "tests$"
-    :devtools
-    {:http-port 8606
-     :http-root "out/demo-test-dummy"}}
+  {:target :browser-test
+   :test-dir "out/demo-test-dummy"
+   :ns-regexp "tests$"
+   :devtools
+   {:http-port 8606
+    :http-root "out/demo-test-dummy"}}
   }}
 
 ; (shadow.cljs.devtools.api/nrepl-select :app)

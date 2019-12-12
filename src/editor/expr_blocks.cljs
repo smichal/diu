@@ -5,7 +5,8 @@
             [incr.core :as incr]
             cljs.reader
             [parts.params :as params]
-            ))
+            [com.rpl.specter :as specter]
+            [malli.core :as m]))
 
 (defn expr-zipper [expr]
   (zip/zipper
@@ -20,7 +21,6 @@
         (or (list? node) (seq? node)) (with-meta (apply list children) (meta node))
         ))
     expr))
-
 
 (defn block [& {:keys [label children expr-zip inline]}]
   {:block
@@ -47,13 +47,15 @@
 
    ])
 
-(declare input-styles)
+(declare input-styles block-or-input2)
 
-(defn string-block [expr-zip ctx]
+(defn string-block [expr-zip spec ctx]
   (block :label "str"
          :expr-zip expr-zip
          :children
-         [{:dom-events {:input {:event :input-changed}}
+         [{:dom-events {:input {:event :input-changed
+                                ;:event-subscription/stop-propagation true
+                                }}
            :set-styles input-styles
            :dom {:tag :input
                  :attrs {:value (zip/node expr-zip)}
@@ -61,30 +63,6 @@
          ))
 
 (declare fn-call getter-block)
-
-(defn block-or-input [expr-zip spec ctx]
-  (let [expr (zip/node expr-zip)]
-    (cond
-      (string? expr) (string-block expr-zip ctx)
-      (and (list? expr) (= (first expr) 'ctx)) (getter-block expr-zip spec ctx)
-      (list? expr) (fn-call expr-zip spec ctx)
-
-      (nil? expr)
-      (choice
-        :expr-zip expr-zip
-        :options
-        (fn [phrase]
-          (concat
-            [{:text (str "\"" phrase "\"") :value phrase}
-             (if-let [v (try (cljs.reader/read-string phrase)
-                             (catch js/Error _ nil))]
-               {:text (str "edn: " phrase) :value v})]
-            (fns-list ctx)
-            ))
-        )
-
-      :else {:dom {:tag :div :text (pr-str expr)}}
-      )))
 
 (defn children-zippers [zip]
   (take-while some? (iterate zip/right (zip/down zip))))
@@ -96,6 +74,7 @@
       (zip/rightmost)))
 
 (defn getter-block [expr-zip spec ctx]
+  ;(js/console.log "zip" expr-zip)
   (let [[k & path] (zip/node expr-zip)
         k (keyword k)
         ;arg-zips (drop 1 (take-while some? (iterate zip/right (zip/down expr-zip))))
@@ -161,33 +140,9 @@
           :children
           (concat
             [{:dom {:tag :div :text (str f)}}]
-            (mapv #(block-or-input % spec ctx) arg-zips)
-            [(block-or-input next-arg spec ctx)]
+            (mapv #(block-or-input2 % spec ctx) arg-zips)
+            [(block-or-input2 next-arg spec ctx)]
             ))))))
-
-(defn string-input [expr-zip spec ctx]
-  ;(js/console.log "string-input" expr-zip )
-  (let [expr (zip/node expr-zip)]
-   (cond
-     (string? expr) (string-block expr-zip ctx)
-     (number? expr) (string-block expr-zip ctx)
-     (keyword? expr) (string-block expr-zip ctx)
-     (and (list? expr) (= (first expr) 'ctx)) (getter-block expr-zip spec ctx)
-     (list? expr) (fn-call expr-zip spec ctx)
-
-     :else                                                  ; (nil? expr)
-     (choice
-       :expr-zip expr-zip
-       :options
-       (fn [phrase]
-         (concat
-           [{:text (str "\"" phrase "\"") :value phrase}
-            (if-let [v (try (cljs.reader/read-string phrase)
-                            (catch js/Error _ nil))]
-              {:text (str "edn: " phrase) :value v})]
-           (fns-list ctx)
-           ))
-       ))))
 
 (defn boolean-input [expr-zip spec ctx]
   (block :label "bool"
@@ -224,7 +179,7 @@
                  ])))
 
 (defn widget-call-block [expr-zip spec ctx]
-  (js/console.log "widget-call-block" expr-zip spec)
+  ;(js/console.log "widget-call-block" expr-zip spec)
   (let [val (zip/node expr-zip)
         {:keys [widget params]} val
         widget-def (get @(::w/widgets ctx) widget)
@@ -249,20 +204,51 @@
                      :button {:text "edit"
                               :theme :tertiary
                               :onclick {:event :select-widget
-                                        ::w/instance-path (seq (conj (-> ctx :scope :ctx-of-widget-in-edit incr/value ::w/instance-path) (count (zip/lefts expr-zip))))}}}]}}
+                                        ::w/instance-path (seq (conj (-> ctx :scope :ctx-of-widget-in-edit incr/value ::w/instance-path)
+                                                                     (count (zip/lefts expr-zip))))}}}]}}
                  (params-block params-zip params-spec ctx :with-other-params true)
                  ]
       )))
 
+(defn part-call-block [expr-zip spec ctx]
+  ;(js/console.log "part-call-block" expr-zip)
+  (let [val (zip/node expr-zip)
+        [part-id params] val
+        part-def (get (::w/parts ctx) part-id)
+        params-spec (some-> part-def :part/params)
+        params-zip (-> expr-zip
+                       (zip/down) (zip/right))]
+    (block
+      :label "p"
+      :expr-zip expr-zip
+      :children [{:h-layout
+                  {:children
+                   [{:set-styles {:font-size "var(--lumo-font-size-l)"
+                                  :font-weight 500
+                                  :align-self :center}
+                     :dom {:tag :div :text (or (some-> part-def :part/name) (pr-str part-id))}}
+                    {:set-styles {:margin "-1px 0"}
+                     :button {:text "edit"
+                              :theme :tertiary
+                              :onclick {:event :select-widget
+                                        ::w/instance-path (seq (conj (-> ctx :scope :ctx-of-widget-in-edit incr/value ::w/instance-path) (count (zip/lefts expr-zip))))}}}]}}
+                 (params-block params-zip params-spec ctx #_:with-other-params #_true)
+                 ])))
+
+
 (defn child-block [expr-zip spec ctx]
   ;(js/console.log "child-block" expr-zip)
   (let [val (zip/node expr-zip)]
-    (if (or (< 1 (count val))
-            (not= :widget (ffirst val)))
+    (if (< 1 (count val))
       (anonymous-widget expr-zip spec ctx)
-      (widget-call-block (-> expr-zip (zip/down) (zip/down) (zip/right))
+      (if (= :widget (ffirst val))
+        (widget-call-block (-> expr-zip (zip/down) (zip/down) (zip/right))
+                           nil
+                           ctx)
+        (part-call-block (-> expr-zip (zip/down))
                          nil
-                         ctx))))
+                         ctx)
+        ))))
 
 (declare block-or-input2)
 
@@ -289,25 +275,37 @@
                                                                      (repeat nil))}}})
                          @(:runtime.widgets/widgets ctx))))]))))
 
+(defn default-values [params]
+  (if (vector? params)
+    (->> (rest params)
+         (keep
+           (fn [[k desc spec]]
+             (when-let [v (when (map? desc) (:param/default desc))]
+               [k (if (implements? IWithMeta v)
+                    (with-meta v {:default-value? true})
+                    v)])))
+         (into {}))
+    {}))
+
 (defn new-widgets-list [ctx]
   (concat
    (map
      (fn [[k v]]
-       {:text (str "w: " k)
-        :value {:widget {:widget k
-                         :params (zipmap (w/infer-params-of-widget (get @(:runtime.widgets/widgets ctx) k))
-                                         (repeat nil))}}})
+       (let [widget-def (get @(:runtime.widgets/widgets ctx) k)]
+         {:label (str "w: " k)
+          :value {:widget {:widget k
+                           :params
+                           (merge
+                             (zipmap (w/infer-params-of-widget widget-def)
+                                     (repeat nil))
+                             (default-values (some-> widget-def :meta :part/params)))}}}))
      @(:runtime.widgets/widgets ctx))
 
    (keep
      (fn [[k v]]
        (when (:part/render v)
-         {:text (str "p: " (or (:part/name v) k))
-          :value {k (when (map? (:part/params v))
-                      (->> (:part/params v)
-                           (map (fn [[k v]]
-                                  [k (:param/default v)]))
-                           (into {})))}}))
+         {:label (str "p: " (or (:part/name v) k))
+          :value {k (default-values (:part/params v))}}))
      (:runtime.widgets/parts ctx))))
 
 (defn children-block [expr-zip spec ctx]
@@ -322,7 +320,8 @@
       :label "[]"
       :children (concat
                   (map #(block-or-input2 % ::params/child ctx) zippers)
-                  [(choice
+                  [(block-or-input2 new-child-zip ::params/child ctx)
+                   #_(choice
                      :expr-zip new-child-zip
                      :placeholder "new child..."
                      :options
@@ -331,17 +330,26 @@
 
 (declare block-or-input2)
 
-(defn map-entry-block [expr-zip spec ctx]
-  ;(js/console.log "map-entry block" expr-zip spec)
+(defn map-entry-block [expr-zip properties spec ctx]
+  ;(js/console.log "map-entry block" expr-zip properties spec)
   (let [[k v] (zip/node expr-zip)
         val-zip (last (children-zippers expr-zip))]
     (block
       :expr-zip expr-zip
       :children
       [{:set-styles {:margin 0}
-        :editor.part-editor/field {:label (or (:param/name spec) (name k))
-                                   :field (block-or-input2 val-zip (:param/type spec) ctx)}}
+        :editor.part-editor/field {:label (or (:param/name properties) (name k))
+                                   :field (block-or-input2 val-zip spec ctx)}}
        ])))
+
+(defn spec-name [spec]
+  (if (vector? spec)
+    (first spec)
+    spec))
+
+(defn spec-form-name [spec]
+  (spec-name (params/form spec)))
+
 
 (defn keys-options [phrase]
   [{:text (str ":" phrase) :value [(keyword phrase) nil]}])
@@ -358,19 +366,35 @@
                           (zip/down)
                           (zip/rightmost)) ; ??
         #_(append-child-zipper expr-zip)
-        ]
+        map-entry-spec (fn [k]
+                         (if spec
+                           (case (spec-form-name spec)
+                             :map (->> (rest (params/form spec))
+                                       (filter #(= k (first %)))
+                                       first
+                                       last)
+                             :map-of (or (some-> spec params/form last
+                                                 any?))
+                             (do (js/console.warn "No matching map-entry-spec" spec)
+                                 any?)
+                             )
+                           any?))]
     (block
       :label (when-not without-label "{}")
       :expr-zip expr-zip
       :children (concat
-                  (map #(map-entry-block % nil ctx) zippers)
+                  (map #(map-entry-block %
+                                         nil                ;; fixme
+                                         (map-entry-spec (first (zip/node %)))
+                                         ctx)
+                       zippers)
                   [(choice
                      :expr-zip new-child-zip
                      :placeholder "new map entry..."
                      :options keys-options)]))))
 
 (defn params-block [expr-zip spec ctx & {:keys [with-other-params]}]
-  (js/console.log "params-block" expr-zip spec)
+  ;(js/console.log "params-block" expr-zip spec)
   (let [expr (zip/node expr-zip)
         [expr expr-zip] (if (nil? expr)
                           [{} (expr-zipper {})]
@@ -385,16 +409,33 @@
                             (zip/rightmost)))
         zipper (fn [k]
                  (or (zippers k)
-                     (new-child-zip k)))]
+                     (new-child-zip k)))
+
+        children-spec (rest spec)
+        spec-keys (set (map first children-spec))
+
+        ]
     (block
       :expr-zip expr-zip
       :children (concat
-                  (map (fn [[k spec]]
-                         (map-entry-block (zipper k) spec ctx))
+                  (map (fn [[k properties spec]]
+                         (map-entry-block (zipper k)
+                                          ;; optional params
+                                          (when spec properties)
+                                          (or spec properties)
+                                          ctx))
+                       (concat
+                         children-spec
+                         (when with-other-params
+                           (keep
+                             (fn [k] (when-not (spec-keys k)
+                                       [k {} any?]))
+                             (keys expr)))
+                         )
                        (merge
                          (when with-other-params
                            (zipmap (keys expr) (repeat nil)))
-                         spec))
+                         children-spec))
                   (when with-other-params
                     [(choice
                        :expr-zip new-child-zip
@@ -402,52 +443,186 @@
                        :options keys-options)])))))
 
 
-(def type->block (atom {}))
+(def type->block-registry (atom {}))
 
-(defn register-block! [spec closed? f]
-  (swap! type->block assoc spec [closed? f]))
+(defn register-block! [spec f]
+  (swap! type->block-registry assoc spec f))
 
 (defn string-or-keyword? [x]
   (or (string? x) (keyword? x)))
 
-(register-block! ::params/tag-name string-or-keyword? string-input)
-(register-block! ::params/string string? string-input)
-(register-block! ::params/children vector? children-block)
-(register-block! ::params/child map? child-block)
-(register-block! ::params/dom-attrs map? map-block)
-(register-block! ::params/locals map? map-block)
-(register-block! ::params/widget string-or-keyword? string-input)
-(register-block! ::params/params map? map-block)
-(register-block! ::params/widget-call map? widget-call-block)
+(defn contains-substr? [str sub]
+  (or (nil? sub) (and str (not= -1 (.indexOf str sub)))))
+
+(def value-providers (atom {}))
+
+(defn register-value-provider [types f]
+  (doseq [t types]
+    (swap! value-providers update t conj f)))
+
+(defn string-provider [spec ctx]
+  (fn [phrase]
+    [{:label (str "\"" phrase "\"") :value phrase}]))
+
+(register-value-provider [string?] string-provider)
+
+(defn child-provider [spec ctx]
+  (let [widgets (new-widgets-list ctx)]
+    (fn [phrase]
+      (filter
+        #(contains-substr? (:label %) phrase)
+        widgets))))
+
+(register-value-provider [::params/child] child-provider)
+
+(register-value-provider [::params/children]
+                         (fn [spec ctx]
+                           (let [child-p (child-provider spec ctx)]
+                             (fn [phrase]
+                               (map
+                                 #(update % :value vector)
+                                 (child-p phrase))))))
+
+(def functions-registry
+  (atom {'scope {:doc "Get value from scope"}
+
+         }))
+
+(defn function-provider [spec ctx]
+  (fn [phrase]
+   (when (and phrase (pos? (.-length phrase)))
+     (let [fns (filter #(contains-substr? (name (key %)) phrase)
+                       @functions-registry)]
+       (map
+         (fn [[k v]]
+           {:label (str k ": " (:doc v)) :value (list k)}
+           )
+         fns)))))
+
+(defn gen-provider [spec ctx & extra-providers]
+  (let [providers (get @value-providers (spec-name spec) [])
+        providers (concat providers extra-providers)
+        ps (map #(% spec ctx) providers)]
+    (fn [phrase]
+      (mapcat
+        #(% phrase)
+        ps))))
+
+(defn map-entry-provider [spec ctx]
+  (case (spec-name spec)
+    :map (fn [phrase]
+           (->> (rest spec)
+                (map first)
+                (filter #(contains-substr? (name %) phrase))
+                (map #(do {:label (str "key: " %) :value [% nil]}))))
+    :map-of (let [p (gen-provider (second spec) ctx)]
+              (fn [phrase]
+                (->> (p phrase)
+                     (map (fn [m] (-> m
+                                      (update :label #(str "kv: " %))
+                                      (update :value #(do [% nil]))))))))))
+
+(defn map-provider [spec ctx]
+  (fn [phrase]
+   (map
+     #(update % :value (fn [[k v]] {k v}))
+     ((map-entry-provider spec ctx) phrase))))
+
+(register-value-provider [:map :map-of] map-provider)
+
+(register-value-provider [:enum]
+                         (fn [spec ctx]
+                           (let [options (rest spec)]
+                             (fn [phrase]
+                               (->> options
+                                    (filter #(contains-substr? (str %) phrase))
+                                    (map #(do {:label (str %) :value %})))))))
+
+(defn choice-for-input [expr-zip spec ctx]
+  (choice
+    :placeholder "Choose"
+    :expr-zip expr-zip
+    :options (incr/incr gen-provider spec ctx
+                        function-provider)
+    #_(fn [phrase]
+        (mapcat
+          #(% phrase spec ctx)
+          providers)
+
+        #_(concat
+            [{:text (str "\"" phrase "\"") :value phrase}
+             (if-let [v (try (cljs.reader/read-string phrase)
+                             (catch js/Error _ nil))]
+               {:text (str "edn: " phrase) :value v})]
+            (fns-list ctx)
+            ))
+    )
+  )
+
+(defn expr-input [expr-zip spec ctx]
+  ;(js/console.log "expr-input" expr-zip )
+  (let [expr (zip/node expr-zip)]
+    (cond
+      (string? expr) (string-block expr-zip spec ctx)
+      (number? expr) (string-block expr-zip spec ctx)
+      (keyword? expr) (string-block expr-zip spec ctx)
+      (list? expr) (fn-call expr-zip spec ctx)
+      (vector? expr) (array-block expr-zip spec ctx)
+      (map? expr) (map-block expr-zip spec ctx)
+
+      (nil? expr) (choice-for-input expr-zip spec ctx)
+
+      :else ;; xxx
+      (string-block expr-zip spec ctx)
+
+      )))
 
 
+(register-block! ::params/tag-name string-block)
+(register-block! ::params/string string-block)
+(register-block! ::params/children children-block)
+(register-block! ::params/child child-block)
+(register-block! ::params/dom-attrs map-block)
+(register-block! ::params/locals map-block)
+(register-block! ::params/widget string-block)
+(register-block! ::params/params params-block)
+(register-block! ::params/widget-call widget-call-block)
+
+(register-block! :map map-block)
+
+
+(defn type->block [spec]
+  (get @type->block-registry (spec-name spec)))
 
 (defn get-block-type [spec value]
-  (let [[closed? block] (get @type->block spec)]
-    (if (and closed? (closed? value))
+  (if (or (nil? value)
+          (list? value) ;; expr
+          )
+    expr-input
+
+    (if-let [block (type->block spec)]
       block
-      (cond
-        (map? spec) params-block
-        :else (cond
-                (map? value) map-block
-                (string? value) string-input
-                (number? value) string-input
-                (keyword? value) string-input
-                (boolean? value) boolean-input
-                (vector? value) array-block
-                (list? value) fn-call
-                :else string-input   ;nil
-                )
-        ))))
+      ;string-block ;; xxx
+
+      expr-input
+      #_(cond
+        (string? value) string-block
+        (number? value) string-block
+        (keyword? value) string-block
+        (map? value) map-block
+        :else string-block
+        )
+
+      )))
 
 (defn block-or-input2 [expr-zip spec ctx]
   (when-let [block (get-block-type spec (zip/node expr-zip))]
     (incr/incr block expr-zip spec ctx)))
 
-(defn expr-input [expr spec ctx]
-  ;(js/console.log "expr-input" expr spec)
+(defn expr-field [expr spec ctx]
+  ;(js/console.log "expr-field" expr spec)
   (let [expr-zip (expr-zipper expr)]
-    (block-or-input2 expr-zip spec ctx)))
+    (block-or-input2 expr-zip (or spec [:map-of keyword? any?]) ctx)))
 
 
 (extend-protocol IStack
@@ -459,10 +634,11 @@
 
 (defn select-handler [event ctx]
   (let [zipper (incr/value (get-in ctx [:scope :expr-zip]))]
-    (js/console.log "select-handler" zipper (:value event) ctx)
+    ;(js/console.log "select-handler" zipper (:value event) ctx)
     [[:emit-event {:event :expr-changed
                    :value (-> zipper
-                              (zip/replace (:value event))
+                              (zip/replace
+                                (:value event))
                               (zip/root))
                    :event/elem-call-id (:event/elem-call-id event) ;fixme
                    }]]))
@@ -472,7 +648,7 @@
   (case (:event/key-pressed event)
     "Backspace" [[:emit-event {:event :expr-changed
                                :value (let [[_ path :as zipper] (incr/value (get-in ctx [:scope :expr-zip]))]
-                                        (js/console.log "Backspace" zipper)
+                                        ;(js/console.log "Backspace" zipper)
 
                                         (if (nil? path)
                                           nil
@@ -487,7 +663,8 @@
   (let [zipper (incr/value (get-in ctx [:scope :expr-zip]))]
     [[:emit-event {:event :expr-changed
                    :value (-> zipper
-                              (zip/replace (:event/value event))
+                              (zip/replace
+                                (:event/value event))
                               (zip/root))
                    :event/elem-call-id (:event/elem-call-id event) ;fixme
                    }]]))
@@ -525,9 +702,11 @@
                     ":focus" {:background "var(--lumo-primary-color-50pct)"}}
                    )
     :locals {:expr-zip '(or (ctx :params :expr-zip) (ctx :scope :expr-zip))}
-    :events-handler {:keydown on-block-keypress
+    :events-handler {:keyup on-block-keypress
                      :input-changed input-changed}
-    :dom-events {:keydown {:event :keydown}}
+    :dom-events {:keyup {:event :keyup
+                         :event-subscription/fns [:not-in-input]
+                         }}
     :dom {:tag :div
           :attrs {:tabindex 0}
           :children
@@ -600,6 +779,6 @@
     :dom-events {:click {:event :select
                          :value (w/gctx :params :item :value)}}
     :dom {:tag :div
-          :text (w/gctx :params :item :text)}}
+          :text (w/gctx :params :item :label)}}
 
    })

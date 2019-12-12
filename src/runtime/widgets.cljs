@@ -90,6 +90,9 @@
   ;(js/console.log "compose-parts" (::param-path ctx)  w ctx)
   (let [parts-defs (::parts ctx)
         part-calls (map-in-order w)
+        part-calls (sort-by #(or (some? (get-in parts-defs [(first %) :part/render]))
+                                 (nil? (get parts-defs (first %))))
+                            part-calls)
         parts-num (count part-calls)
         part-calls (map-indexed (fn [idx [id params]]
                           (let [part (get parts-defs id)]

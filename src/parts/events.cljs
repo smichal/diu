@@ -38,7 +38,7 @@
                   js/parseInt))
         handler (incr/value (get-in ctx [::handlers (:event event)]))]
 
-    (js/console.log "event" event ctx)
+    (js/console.log "event" event #_ctx)
 
     (if handler
       (execute-effects! (handler event ctx) ctx)

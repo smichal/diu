@@ -45,17 +45,11 @@
           :dom {:tag :h4 :text "+"}}
          ]}}
 
-      #_{:set-styles {:padding "0 12px"}
-         :list-of {:items (expr '(ctx :scope :part :part/editor))
-                   :param-for-value :item
-                   :item-widget :param-editor
-                   }}
-
       {:set-styles {:padding "0 12px"}
        :dom
        {:children
         [(w/with-ctx
-           #(editor.expr-blocks/expr-input
+           #(editor.expr-blocks/expr-field
               (-> %
                   (get-in [:scope :widget])
                   incr/value
@@ -67,13 +61,6 @@
               %))]}}
 
       ]}}
-
-   ;:default-prop-field
-   #_{:text-field {:label (w/gctx :params :label)
-                   :value (w/with-ctx (fn [ctx] (pr-str (get-in ctx [:params :value]))))
-                   :oninput {:event :field-changed
-                             :field (w/gctx :params :label)
-                             }}}
 
    ::field
    {:set-styles {:flex-wrap :wrap
@@ -94,8 +81,8 @@
       ]}
     }
 
-   :expr-input
-   {:set-styles {:flex-grow 1}
+   ;:expr-input
+   #_{:set-styles {:flex-grow 1}
     :dom {:children [(w/with-ctx
                        #(editor.expr-blocks/expr-input
                           (-> %
@@ -108,38 +95,12 @@
                               (get-in [:part/params (get-in % [:scope :param-id])]))
                           %))]}}
 
-   :param-editor
-   {:locals {:param-id (w/gctx :params :item :param)}
+   ;:param-editor
+   #_{:locals {:param-id (w/gctx :params :item :param)}
     ::field
     {:label (w/gctx :params :item :label)
      :field {:expr-input {}}}
-
-    ;:dom
-    #_{:children
-       [{:text-field {:label (w/gctx :params :desc :param/name)
-                      :value (expr '(pr-str (get-in (ctx :scope :widget) [(ctx :scope :part-id) (ctx :params :param-id)])))
-                      #_(w/with-ctx (fn [ctx] (pr-str (get-in ctx [:params :value]))))
-                      :oninput {:event :field-changed
-                                :field (w/gctx :params :param-id)
-                                }}}
-
-
-        (w/with-ctx
-          #(editor.expr-blocks/expr-input
-             (-> %
-                 (get-in [:scope :widget])
-                 incr/value
-                 (get-in [(get-in % [:scope :part-id]) (get-in % [:scope :param-id])])
-                 )
-             (-> %
-                 (get-in [:scope :part])
-                 incr/value
-                 (get-in [:part/params-s (get-in % [:scope :param-id])])
-                 )
-             #_(get-in (ctx :scope :widget) [(ctx :scope :part-id) (ctx :params :param-id)])
-             %))
-
-        ]}}
+    }
 
    })
 

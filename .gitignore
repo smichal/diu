@@ -16,3 +16,4 @@ pom.xml
 /.idea/
 /.shadow-cljs/
 package-lock.json
+.cpcache

@@ -2,35 +2,38 @@
   (:require [runtime.widgets :as w]
             [incr.core :as incr]
             [parts.events :as e]
+            [parts.params :as params]
             ))
 
 (defn search-filter [phrase items]
-  ;(js/console.log "search-filter" phrase items)
   (->> items
        (filterv #(clojure.string/includes? (clojure.string/lower-case (:name %))
                                            (clojure.string/lower-case phrase)))))
 
 (defn search-input-key-event [event ctx]
-  (let [items-num (count (incr/value (get-in ctx [:scope :items])))
+  (let [items (incr/value (get-in ctx [:scope :items]))
+        items-num (count items)
         curr @(get-in ctx [:scope :active-item])]
     ;; fixme: count after filter
     (case (:event/key-pressed event)
       "ArrowUp" [:set-local :active-item (max 0 (dec curr))]
       "ArrowDown" [:set-local :active-item (min (inc curr) (dec items-num))]
-      #_"Enter" #_[[:dispatch-event (assoc (get-in ctx [:props :on-select])
-                                      :item selected)]
-                   [:set-local :popup false]]
+      "Enter" [:emit-event (assoc
+                             (get-in ctx [:scope :on-select])
+                             :item (nth items curr)
+                             :event/elem-call-id (:event/elem-call-id event))]
       nil)))
 
 (defn dialog-open-event [event _]
   [[:set-local :dialog (:event/value event)]])
 
-(defn parts-for-search [parts]
-  (->> parts
-       (map (fn [[k v]]
-              {:name (or (:part/name v) (str k))
-               :desc (or (:part/desc v) "")}
-              ))))
+(defn add-part-handler [event ctx]
+  (when-let [part-id (get-in event [:item :part-id])]
+    (js/console.log part-id (get-in ctx [:scope :widget-in-edit]))
+    [[:set-local :dialog false]
+     [:change-widget {:widget (get-in ctx [:scope :widget-in-edit])
+                      :part part-id
+                      :value {}}]]))
 
 (def widgets
   {
@@ -66,12 +69,19 @@
                      }
     :v-layout
     {:children
-     [{:set-styles {:background "var(--lumo-contrast-5pct)"}
+     [{:set-styles {:background "var(--lumo-contrast-5pct)"
+                    :justify-content :flex-start}
        :h-layout
        {:children
         [{:button {:icon "lumo:undo"
                    :theme "contrast tertiary"
                    :onclick {:event :undo}}}
+
+         {:button {:icon "lumo:edit"
+                   :theme "contrast tertiary"
+                   ;:onclick {:event :undo}
+                   }}
+
          ]}}
       {:set-styles {:flex 1}
        :editor-tabs {:app-in-edit (w/gctx :params :app-in-edit)}}]}
@@ -114,6 +124,7 @@
                       :attrs {:label (w/gctx :params :label)
                               :placeholder (w/gctx :params :placeholder)
                               :value (w/gctx :params :value)
+                              :autofocus (w/gctx :params :autofocus)
                               }}}
 
    :v-layout {:set-styles {:display :flex
@@ -121,8 +132,12 @@
               :dom {:tag :div
                     :children '(params :children)}
               :meta {:part/name "Vertical layout"
-                     :part/params {:children {:param/type :parts.params/children}}}
-              }
+                     :part/params
+                     [:params/params
+                      [:children
+                       {:param/default [{:widget {:widget :widget-placeholder
+                                                  :params {}}}]}
+                       ::params/children]]}}
 
    :h-layout {:set-styles {:display :flex
                            :flex-direction :row
@@ -130,14 +145,23 @@
               :dom {:tag :div
                     :children '(params :children)}
               :meta {:part/name "Horizontal layout"
-                     :part/params {:children {:param/type :parts.params/children}}}
-              }
+                     :part/params
+                     [:params/params
+                      [:children ::params/children]]}}
+
+   :widget-placeholder {:set-styles {:padding "5px 10px"
+                                     :background "#ddd"
+                                     :text-align :center
+                                     }
+                        :dom {:tag :div
+                              :text "+ add widget"}}
 
    :widget-properties
    {:set-styles {:height "100%"
                  :overflow :scroll}
     :local-state {:dialog false}
-    :events-handler {:dialog dialog-open-event}
+    :events-handler {:dialog dialog-open-event
+                     :add-part add-part-handler}
     :v-layout
     {:children [{:set-styles {:margin "16px 12px 0"}
                  :dom {:tag :h5 :text "widget"}}
@@ -186,7 +210,8 @@
                  {:opened (w/gctx :scope :dialog)
                   :children [{:search-dialog {:items
                                               '(parts-for-search (ctx ::w/parts))
-                                              #_(w/with-ctx #(incr/incr parts-for-search (get % ::w/parts)))}}]
+                                              :on-select {:event :add-part}
+                                              }}]
                   :opened-changed {:event :dialog}}}
                 ]}
     :order [:local-state :events-handler :set-styles :v-layout]
@@ -197,11 +222,7 @@
    {:local-state {:edit-mode false}
     :dom-events {:click {:event :select-widget}}
     :dom {:tag :div
-          :children [{:widget {:widget (w/gctx :params :app-in-edit)}}
-
-                     #_{:search-dialog {:items (w/with-ctx #(incr/incr parts-for-search (get % ::w/parts)))}}
-
-                     ]}}
+          :children [{:widget {:widget (w/gctx :params :app-in-edit)}}]}}
    ;:order [:events-handler :dom-events]
 
    :dialog
@@ -215,7 +236,8 @@
    {:set-styles {:width 500}
     :local-state {:phrase ""
                   :active-item 0}
-    :locals {:items (w/gctx :params :items)}
+    :locals {:items (w/gctx :params :items)
+             :on-select (w/gctx :params :on-select)}
     :events-handler {:change-phrase (fn [event _] [[:set-local :phrase (:event/value event)]
                                                    [:set-local :active-item 0]])
                      :set-active (fn [event _] [:set-local :active-item (:item event)])
@@ -225,13 +247,13 @@
      [{:dom-events {:keydown {:event :keydown}}
        :text-field {:placeholder "Search"
                     :oninput {:event :change-phrase}
-                    }}
+                    :autofocus :true}}
       {:list-of {:items (w/with-ctx #(incr/incr search-filter
                                                 (get-in % [:scope :phrase])
                                                 (get-in % [:scope :items])))
                  :item-widget :search-item
-                 }}
-      ]}}
+                 }}]}}
+
    :search-item
    {:set-styles {:background '(if (= (ctx :scope :active-item)
                                      (ctx :params :key))

@@ -85,7 +85,8 @@
      {:children
       [{:set-styles {:font-weight 500
                      :font-size 24}
-        :dom {:text "todos"}}
+        :dom {:tag :div
+              :text "todos"}}
 
        {:list-of {:items '(scope :todos)
                   :item-widget :todo-item}}
@@ -95,6 +96,7 @@
 
        {:widget {:widget :todos-left-label
                  :params {}}}
+
 
        ]}}}
 

@@ -1,26 +1,31 @@
 (ns parts.base
   (:require [incr.core :as incr]
-            [parts.params :as parts])
+            [parts.params :as params])
   (:use [runtime.widgets :only [defpart resolve-widget call]]))
 
 (defpart
   :dom
   :part/name "HTML Element"
   :part/desc "Creates DOM element with given tag, attributes, and content"
-
   :part/params
-  {:tag {:param/name "Tag"
-         :param/default :div
-         :param/type ::parts/tag-name}
-   :attrs {:param/name "Attributes"
-           :param/type ::parts/dom-attrs}
-   :text {:param/name "Text"
-          :param/default "Text..."
-          :param/type ::parts/string}
-   :children {:param/name "Children"
-              :param/default []
-              :param/type ::parts/children}
-   }
+  [::params/params
+   [:tag
+    {:param/name "Tag"
+     :param/default :div}
+    string?
+    ;[:enum :div :p :h1]
+    ]
+   [:attrs
+    {:param/name "Attributes"}
+    [:map-of string? string?]]
+   [:text
+    {:param/name "Text"
+     :param/default "Text..."}
+    string?]
+   [:children
+    {:param/name "Children"
+     :param/default []}
+    ::params/children]]
 
   :part/render
   (fn [ctx params]
@@ -42,10 +47,7 @@
   :widget
   :part/name "Call widget"
   :part/desc "Calls other widget with given params"
-  :part/params ::parts/widget-call #_{:widget {:param/type ::parts/widget
-                         :param/name "Widget"}
-                :params {:param/type ::parts/params
-                         :param/name "Params"}}
+  :part/params ::params/widget-call
   :part/render
   (fn [ctx {:keys [widget params]}]
     ;; todo: incr?
@@ -68,7 +70,7 @@
   :local-state
   :part/name "Local state"
   :part/desc "Adds local state to widget"
-  :part/params ::parts/locals
+  :part/params ::params/locals
   :part/augment-ctx
   (fn [ctx params]
     @(incr/incr add-local-state ctx params)))
@@ -77,7 +79,7 @@
   :locals
   :part/name "Locals"
   :part/desc "Sets constant values in widget's scope"
-  :part/params ::parts/locals
+  :part/params ::params/locals
   :part/augment-ctx
   (fn [ctx params]
     (update ctx :scope merge params)))
@@ -88,6 +90,15 @@
   :list-of
   :part/name "List of"
   :part/desc "Creates widget for each element of list"
+  :part/params
+  [::params/params
+   [:items any?]
+   [:item-widget keyword?    ;::params/child
+    ]
+   [:param-for-key keyword?]
+   [:param-for-value keyword?]
+   [:common-params [:map-of keyword? any?]]
+   ]
   :part/render (fn [ctx {:keys [items
                                 item-widget
                                 param-for-key
@@ -134,7 +145,8 @@
 (defpart
   :meta
   :part/name "Metadata"
-  :part/params {:part/params {:param/name "Params"
-                              :param/type ::parts/params}
+  :part/params
+  [::params/params
+   [:part/params {:param/name "Params"} ::params/params]]
 
-   })
+  )
