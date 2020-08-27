@@ -1,39 +1,40 @@
-# ui-des
+## Declarative, incremental UI
 
-FIXME: Write a one-line description of your library/project.
+It's an experimental, not finished (and currently abandoned) project, which I decided to share, with the thought that some ideas stated below can be valuable for someone else.
 
-## Overview
+The general idea was to create a graphical editor for UI of modern web apps. Such a tool could potentially speed up apps developing processes, allow non-programmers to create simple apps or interactive prototypes (in a somewhat spreadsheet-like way), or allow designers to alter the appearance of real apps without going to code.
 
-FIXME: Write a paragraph about the library/project and highlight its goals.
+## Building blocks
 
-## Setup
+### UI as data
 
-To get an interactive development environment run:
+First of all, to make a WYSIWYG-like editor for UI it would be nice to represent our UI (composition and configuration of widgets) as data rather than as code (like e.g. in React/JSX). Data is obviously less powerful than code, but for data manipulation, easy to use, graphical tools can be created quite easily.
 
-    lein figwheel
+So, widgets can be represented as a composition of "parts". Fo example:
 
-and open your browser at [localhost:3449](http://localhost:3449/).
-This will auto compile and send all changes to the browser without the
-need to reload. After the compilation process is complete, you will
-get a Browser Connected REPL. An easy way to try it is:
+```
+{:set-styles {:font-weight 500
+              :font-size 24}
+ :dom {:tag :div
+       :text "todos"}}
+```
+Above we have a widget built from parts `:dom` (which returns a description of one DOM element) and `:set-styles` (which sets styles in the description of DOM of the current widget). Each part has parameters that can be set in the editor:
 
-    (js/alert "Am I connected?")
+![](imgs/img1.png)
 
-and you should see an alert in the browser window.
+The definition of part consists of a function that does all the heavy lifting of adding new behaviors to widgets, and the metadata that can be used to display a user-friendly configuration of the part (type spec of parameters and documentation).
+Parts can be thought as functions:
+`(context, DOM description) => (new context, new DOM description)`. Parts as executed in a similar way to middlewares or interceptors.
 
-To clean all compiled files:
+Parts could not only change the DOM of a widget, but they also can modify the context/environment of the widget. This makes it possible to add some local state or fetch data and make them available to the widget.
 
-    lein clean
+![](imgs/img2.png)
 
-To create a production build run:
+![](imgs/img3.png)
 
-    lein do clean, cljsbuild once min
+![](imgs/img4.png)
 
-And open your browser in `resources/public/index.html`. You will not
-get live reloading, nor a REPL. 
+### Incremental computations
 
-## License
+[todo]
 
-Copyright © 2014 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at your option) any later version.

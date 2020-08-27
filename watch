@@ -1,1 +1,2 @@
+#!/usr/bin/env bash
 clj -m shadow.cljs.devtools.cli watch app
